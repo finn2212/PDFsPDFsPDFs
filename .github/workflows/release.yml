@@ -1,0 +1,65 @@
+# Builds and publishes a release whenever a v* tag is pushed.
+#
+# One-time setup in the GitHub repo:
+#   Settings → Secrets and variables → Actions → New repository secret
+#   Name:  SPARKLE_ED_PRIVATE_KEY
+#   Value: output of `.build/artifacts/sparkle/Sparkle/bin/generate_keys -x /dev/stdout`
+#          (the base64 private key line)
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # CFBundleVersion == marketing version, identical to scripts/release.sh —
+          # mixing schemes would silently break Sparkle's version comparison.
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" Info.plist
+
+      - name: Build app (universal)
+        run: ./build_app.sh
+
+      - name: Zip app
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ditto -c -k --sequesterRsrc --keepParent dist/PDFsPDFsPDFs.app "dist/PDFsPDFsPDFs-$VERSION.zip"
+
+      - name: Generate signed appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          echo "$SPARKLE_ED_PRIVATE_KEY" > /tmp/ed_key
+          .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
+            --ed-key-file /tmp/ed_key \
+            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/" \
+            dist/
+          rm /tmp/ed_key
+          # A key mismatch makes generate_appcast emit an UNSIGNED appcast with
+          # exit 0; ad-hoc-signed apps hard-require the EdDSA signature.
+          grep -q "sparkle:edSignature" dist/appcast.xml || {
+            echo "ERROR: appcast has no EdDSA signature (secret does not match SUPublicEDKey?)" >&2
+            exit 1
+          }
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/PDFsPDFsPDFs-$VERSION.zip" dist/appcast.xml \
+            --title "PDFsPDFsPDFs $VERSION" \
+            --generate-notes
