@@ -7,6 +7,8 @@
 # Requirements: Sparkle EdDSA key in the login keychain (generate_keys),
 # gh CLI authenticated for --publish.
 set -e
+# Unmatched globs must expand to nothing instead of aborting the script.
+setopt NULL_GLOB
 cd "$(dirname "$0")/.."
 
 REPO="finn2212/PDFsPDFsPDFs"
