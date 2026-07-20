@@ -200,37 +200,54 @@ struct SplitPanel: View {
 struct TextPanel: View {
     @EnvironmentObject var doc: DocumentModel
 
-    @State private var text = ""
-    @State private var fontSize: Double = 14
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            TextField(loc("text.placeholder"), text: $text, axis: .vertical)
-                .lineLimit(3...6)
-                .textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: 14) {
+            Toggle(isOn: Binding(
+                get: { doc.textToolActive },
+                set: { doc.textToolActive = $0 }
+            )) {
+                Label(loc("text.tool"), systemImage: "character.cursor.ibeam")
+            }
+            .toggleStyle(.button)
+            .controlSize(.large)
+            .disabled(doc.document == nil)
+
+            Text(loc("text.toolHint"))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack {
                 Text(loc("text.size"))
-                Slider(value: $fontSize, in: 8...72)
-                Text("\(Int(fontSize)) pt")
+                Slider(value: Binding(
+                    get: { Double(doc.textToolFontSize) },
+                    set: { doc.textToolFontSize = CGFloat($0) }
+                ), in: 8...72)
+                Text("\(Int(doc.textToolFontSize)) pt")
                     .monospacedDigit()
                     .frame(width: 46, alignment: .trailing)
             }
             .font(.callout)
 
-            Button(loc("text.insert")) {
-                doc.startPlacingText(text, fontSize: fontSize)
+            Divider()
+
+            Button {
+                doc.startPlacingToday(fontSize: doc.textToolFontSize)
+            } label: {
+                Label(loc("tools.insertDate"), systemImage: "calendar")
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(doc.document == nil ||
-                      text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(doc.document == nil)
+
+            Text(loc("text.dateHint", doc.todayString))
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Divider()
 
-            Button(loc("tools.insertDate")) {
-                doc.startPlacingToday()
-            }
-            .disabled(doc.document == nil)
+            Text(loc("text.editHint"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer()
         }

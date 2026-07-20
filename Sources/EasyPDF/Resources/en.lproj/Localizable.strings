@@ -33,7 +33,7 @@
 "placeholder.subtitle" = "Open a PDF or simply drag one here.";
 "placeholder.open" = "Open PDF…";
 "hint.placement" = "Click where “%@” should be placed in the document. Press Esc to cancel.";
-"hint.selected" = "Drag to move · drag corners to resize · red × or Delete key to remove";
+"hint.selected" = "Drag to move · corners = resize · blue grip below = rotate (Shift snaps to 15°) · red × = delete";
 "status.saved" = "Saved: %@";
 "alert.saveError" = "Saving failed";
 "alert.ok" = "OK";
@@ -98,3 +98,12 @@
 "unsaved.save" = "Save";
 "unsaved.discard" = "Discard";
 "unsaved.cancel" = "Cancel";
+"toolbar.rotateStampLeft" = "Rotate left";
+"toolbar.rotateStampRight" = "Rotate right";
+"text.tool" = "Text tool";
+"text.toolHint" = "Activate the tool, then click anywhere in the document and start typing. Enter applies, Esc cancels.";
+"text.inlinePlaceholder" = "Type…";
+"text.dateHint" = "Inserts “%@”.";
+"text.editHint" = "Double-click an inserted text to edit it again.";
+"hint.textTool" = "Click where you want to write. Esc leaves the text tool.";
+"hint.typing" = "Type your text · font size in the toolbar · Enter applies · Esc cancels";

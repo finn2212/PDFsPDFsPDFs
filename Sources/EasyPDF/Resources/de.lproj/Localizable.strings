@@ -33,7 +33,7 @@
 "placeholder.subtitle" = "Öffne ein PDF oder ziehe es einfach hierher.";
 "placeholder.open" = "PDF öffnen…";
 "hint.placement" = "Klicke an die Stelle im Dokument, an der „%@“ eingefügt werden soll. Esc bricht ab.";
-"hint.selected" = "Ziehen zum Verschieben · Ecken ziehen für die Größe · rotes × oder Entf zum Löschen";
+"hint.selected" = "Ziehen zum Verschieben · Ecken = Größe · blauer Griff unten = drehen (Shift rastet in 15°) · rotes × = löschen";
 "status.saved" = "Gespeichert: %@";
 "alert.saveError" = "Speichern fehlgeschlagen";
 "alert.ok" = "OK";
@@ -98,3 +98,12 @@
 "unsaved.save" = "Speichern";
 "unsaved.discard" = "Verwerfen";
 "unsaved.cancel" = "Abbrechen";
+"toolbar.rotateStampLeft" = "Nach links drehen";
+"toolbar.rotateStampRight" = "Nach rechts drehen";
+"text.tool" = "Text-Werkzeug";
+"text.toolHint" = "Werkzeug aktivieren, dann an die gewünschte Stelle im Dokument klicken und direkt lostippen. Enter übernimmt, Esc bricht ab.";
+"text.inlinePlaceholder" = "Tippen…";
+"text.dateHint" = "Fügt „%@“ ein.";
+"text.editHint" = "Doppelklick auf einen eingefügten Text öffnet ihn wieder zum Bearbeiten.";
+"hint.textTool" = "Klicke an die Stelle, an der du schreiben möchtest. Esc beendet das Text-Werkzeug.";
+"hint.typing" = "Tippe deinen Text · Schriftgröße oben in der Leiste · Enter übernimmt · Esc bricht ab";

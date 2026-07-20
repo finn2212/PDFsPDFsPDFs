@@ -14,13 +14,17 @@ Adobe-artige Icon-Leiste; jedes Werkzeug öffnet ein eigenes Panel:
 - 📄 **Seiten** — große Seitenvorschau; Rechtsklick: drehen, verschieben, exportieren, löschen
 - ➕ **Zusammenfügen** — mehrere PDFs sortieren und mergen
 - ✂️ **Trennen** — Seitenbereich („1-3, 5“) extrahieren oder alle Seiten einzeln speichern
-- 🔤 **Text & Datum** — freien Text oder das heutige Datum platzieren
+- 🔤 **Text & Datum** — Text-Werkzeug im Acrobat-Stil: aktivieren, in die Seite klicken, direkt lostippen
+
+### Text schreiben
+
+Text-Werkzeug einschalten, an die gewünschte Stelle klicken und tippen — der Text erscheint sofort dort, wo er später steht. Die Schriftgröße lässt sich **während des Tippens** oben in der Leiste ändern, Enter übernimmt, Esc bricht ab. Ein **Doppelklick** auf einen eingefügten Text öffnet ihn wieder zum Bearbeiten. Das heutige Datum gibt es als Ein-Klick-Button.
 
 ### Unterschreiben
 
 - Beliebig viele Personen; pro Person **Unterschrift** und **Initialen**, dauerhaft gespeichert (`~/Library/Application Support/PDFsPDFsPDFs/`).
 - Erfassung per *Zeichnen* (Maus/Trackpad) oder *Bildimport* (optional mit automatischer Weiß-Entfernung).
-- Platzieren per Klick; danach Auswahl-Widget direkt an der Unterschrift: Ecken ziehen = Größe, rotes × = löschen, Ziehen = verschieben.
+- Platzieren per Klick; danach Auswahl-Widget direkt an der Unterschrift: **Ecken ziehen = Größe**, **blauer Griff unten = frei drehen** (Shift rastet in 15°-Schritten; alternativ die Drehen-Buttons in der Leiste), **rotes × = löschen**, Ziehen = verschieben.
 - **Rückgängig/Wiederholen** (Cmd+Z / Cmd+Shift+Z) für alles.
 - Formularfelder (AcroForms) füllt PDFKit direkt aus.
 

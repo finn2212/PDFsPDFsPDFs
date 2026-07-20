@@ -54,8 +54,12 @@ struct ContentView: View {
     private var detail: some View {
         if doc.document != nil {
             VStack(spacing: 0) {
-                if let pending = doc.pendingStamp {
+                if doc.isEditingText {
+                    banner(text: loc("hint.typing"), color: .blue)
+                } else if let pending = doc.pendingStamp {
                     banner(text: loc("hint.placement", pending.label), color: .blue)
+                } else if doc.textToolActive {
+                    banner(text: loc("hint.textTool"), color: .blue)
                 } else if doc.selectedStampID != nil {
                     banner(text: loc("hint.selected"), color: .secondary)
                 } else if let status = doc.statusMessage {
@@ -160,7 +164,18 @@ struct ContentView: View {
             .help(loc("toolbar.redo"))
             .disabled(!doc.canRedo)
 
-            if doc.selectedStampID != nil {
+            if doc.isEditingText {
+                // Live font size while typing inline.
+                Slider(value: Binding(
+                    get: { Double(doc.textToolFontSize) },
+                    set: { doc.textToolFontSize = CGFloat($0) }
+                ), in: 8...72)
+                .frame(width: 140)
+                .help(loc("text.size"))
+
+                Text("\(Int(doc.textToolFontSize)) pt")
+                    .monospacedDigit()
+            } else if doc.selectedStampID != nil {
                 Slider(
                     value: Binding(
                         get: { stampWidth },
@@ -181,6 +196,20 @@ struct ContentView: View {
                 )
                 .frame(width: 140)
                 .help(loc("toolbar.size"))
+
+                Button {
+                    doc.rotateSelected(by: -15)
+                } label: {
+                    Label(loc("toolbar.rotateStampLeft"), systemImage: "rotate.left")
+                }
+                .help(loc("toolbar.rotateStampLeft"))
+
+                Button {
+                    doc.rotateSelected(by: 15)
+                } label: {
+                    Label(loc("toolbar.rotateStampRight"), systemImage: "rotate.right")
+                }
+                .help(loc("toolbar.rotateStampRight"))
 
                 Button {
                     doc.removeSelected()

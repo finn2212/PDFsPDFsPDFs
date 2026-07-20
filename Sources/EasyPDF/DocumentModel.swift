@@ -5,65 +5,144 @@ import UniformTypeIdentifiers
 struct PlacedStamp: Identifiable {
     let id: UUID
     let page: PDFPage
+    /// Unrotated placement rect in page coordinates.
     var rect: CGRect
+    /// Rotation around the rect's center, in degrees (counter-clockwise).
+    var rotation: CGFloat = 0
     let image: NSImage
+    /// Set for text stamps, which stay re-editable via double-click.
+    var text: String? = nil
+    var fontSize: CGFloat = 14
 }
 
 struct PendingStamp {
     let image: NSImage
     let defaultWidth: CGFloat
     let label: String
+    /// Set for text stamps so they stay editable after placing.
+    var text: String? = nil
+    var fontSize: CGFloat = 14
 }
 
 final class ImageStampAnnotation: PDFAnnotation {
-    /// Padding around the image so selection handles and the delete button
-    /// can be drawn inside the annotation's bounds (PDFKit clips to bounds).
-    static let pad: CGFloat = 18
+    /// Padding around the image so selection handles, the delete button and the
+    /// rotate grip fit inside the annotation bounds (PDFKit clips to bounds).
+    static let pad: CGFloat = 26
     static let handleSize: CGFloat = 9
     static let deleteRadius: CGFloat = 8
+    static let rotateRadius: CGFloat = 8
+    /// Distance of the widget buttons from the stamp edge.
+    static let buttonGap: CGFloat = 11
 
     let image: NSImage
     let stampID: UUID
     var isSelectedUI = false
+    /// Unrotated image rect in page coordinates.
+    var imageRect: CGRect = .zero
+    /// Rotation in degrees around the image rect's center.
+    var rotationDegrees: CGFloat = 0
 
-    /// The rect the image itself occupies (annotation bounds minus padding).
-    var imageRect: CGRect { bounds.insetBy(dx: Self.pad, dy: Self.pad) }
-
-    static func annotationBounds(for imageRect: CGRect) -> CGRect {
-        imageRect.insetBy(dx: -pad, dy: -pad)
+    /// Annotation bounds must cover the rotated image plus widget padding.
+    static func annotationBounds(for imageRect: CGRect, rotation: CGFloat) -> CGRect {
+        rotatedBoundingBox(of: imageRect, rotation: rotation).insetBy(dx: -pad, dy: -pad)
     }
 
-    static func deleteButtonCenter(for imageRect: CGRect) -> CGPoint {
-        CGPoint(x: imageRect.midX, y: imageRect.maxY + 9)
+    static func rotatedBoundingBox(of rect: CGRect, rotation: CGFloat) -> CGRect {
+        guard rotation != 0 else { return rect }
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let corners = [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+                       CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)]
+            .map { rotate(point: $0, around: center, degrees: rotation) }
+        let xs = corners.map(\.x), ys = corners.map(\.y)
+        return CGRect(x: xs.min()!, y: ys.min()!,
+                      width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
     }
 
-    static func handleCenters(for imageRect: CGRect) -> [CGPoint] {
-        [CGPoint(x: imageRect.minX, y: imageRect.minY),
-         CGPoint(x: imageRect.maxX, y: imageRect.minY),
-         CGPoint(x: imageRect.minX, y: imageRect.maxY),
-         CGPoint(x: imageRect.maxX, y: imageRect.maxY)]
+    static func rotate(point: CGPoint, around center: CGPoint, degrees: CGFloat) -> CGPoint {
+        guard degrees != 0 else { return point }
+        let rad = degrees * .pi / 180
+        let dx = point.x - center.x, dy = point.y - center.y
+        return CGPoint(x: center.x + dx * cos(rad) - dy * sin(rad),
+                       y: center.y + dx * sin(rad) + dy * cos(rad))
     }
 
-    init(image: NSImage, stampID: UUID, bounds: CGRect) {
+    /// Delete button sits above the stamp's top edge, rotating with it.
+    static func deleteButtonCenter(for rect: CGRect, rotation: CGFloat) -> CGPoint {
+        rotate(point: CGPoint(x: rect.midX, y: rect.maxY + buttonGap),
+               around: CGPoint(x: rect.midX, y: rect.midY), degrees: rotation)
+    }
+
+    /// Rotate grip sits below the stamp's bottom edge.
+    static func rotateGripCenter(for rect: CGRect, rotation: CGFloat) -> CGPoint {
+        rotate(point: CGPoint(x: rect.midX, y: rect.minY - buttonGap),
+               around: CGPoint(x: rect.midX, y: rect.midY), degrees: rotation)
+    }
+
+    /// Corner-drag resize for a possibly rotated stamp: keeps the aspect ratio
+    /// and keeps `anchor` (the opposite corner, in the stamp's unrotated space)
+    /// visually fixed. `startRect` must be the rect from the gesture's start so
+    /// the pivot doesn't drift while dragging.
+    static func resizedRect(startRect: CGRect, anchor: CGPoint, aspect: CGFloat,
+                            rotation: CGFloat, dragPoint: CGPoint,
+                            minWidth: CGFloat = 24) -> CGRect {
+        let startCenter = CGPoint(x: startRect.midX, y: startRect.midY)
+        let local = rotate(point: dragPoint, around: startCenter, degrees: -rotation)
+        let width = max(minWidth, abs(local.x - anchor.x))
+        let height = width * aspect
+        var rect = CGRect(x: local.x < anchor.x ? anchor.x - width : anchor.x,
+                          y: local.y < anchor.y ? anchor.y - height : anchor.y,
+                          width: width, height: height)
+        guard rotation != 0 else { return rect }
+        // Resizing moves the centre, which shifts the rotated result; compensate
+        // so the anchored corner stays where the user grabbed it.
+        let newCenter = CGPoint(x: rect.midX, y: rect.midY)
+        let want = rotate(point: anchor, around: startCenter, degrees: rotation)
+        let have = rotate(point: anchor, around: newCenter, degrees: rotation)
+        rect = rect.offsetBy(dx: want.x - have.x, dy: want.y - have.y)
+        return rect
+    }
+
+    static func handleCenters(for rect: CGRect, rotation: CGFloat) -> [CGPoint] {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        return [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+                CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)]
+            .map { rotate(point: $0, around: center, degrees: rotation) }
+    }
+
+    init(image: NSImage, stampID: UUID, imageRect: CGRect, rotation: CGFloat) {
         self.image = image
         self.stampID = stampID
-        super.init(bounds: bounds, forType: .stamp, withProperties: nil)
+        self.imageRect = imageRect
+        self.rotationDegrees = rotation
+        super.init(bounds: Self.annotationBounds(for: imageRect, rotation: rotation),
+                   forType: .stamp, withProperties: nil)
         self.shouldDisplay = true
         self.shouldPrint = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    func update(imageRect: CGRect, rotation: CGFloat) {
+        self.imageRect = imageRect
+        self.rotationDegrees = rotation
+        self.bounds = Self.annotationBounds(for: imageRect, rotation: rotation)
+    }
+
     override func draw(with box: PDFDisplayBox, in context: CGContext) {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
         let rect = imageRect
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+
         context.saveGState()
+        context.translateBy(x: center.x, y: center.y)
+        context.rotate(by: rotationDegrees * .pi / 180)
+        context.translateBy(x: -center.x, y: -center.y)
         context.draw(cg, in: rect)
 
         if isSelectedUI {
             let accent = NSColor.controlAccentColor.cgColor
 
-            // Dashed selection frame
+            // Dashed selection frame (drawn in the rotated space)
             context.setStrokeColor(accent)
             context.setLineWidth(1.5)
             context.setLineDash(phase: 0, lengths: [4, 3])
@@ -72,8 +151,9 @@ final class ImageStampAnnotation: PDFAnnotation {
 
             // Corner resize handles
             let h = Self.handleSize
-            for center in Self.handleCenters(for: rect) {
-                let handleRect = CGRect(x: center.x - h / 2, y: center.y - h / 2, width: h, height: h)
+            for c in [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+                      CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)] {
+                let handleRect = CGRect(x: c.x - h / 2, y: c.y - h / 2, width: h, height: h)
                 context.setFillColor(NSColor.white.cgColor)
                 context.fill(handleRect)
                 context.setStrokeColor(accent)
@@ -82,18 +162,33 @@ final class ImageStampAnnotation: PDFAnnotation {
             }
 
             // Delete button (red circle with white ×) above the stamp
-            let c = Self.deleteButtonCenter(for: rect)
-            let r = Self.deleteRadius
-            let circle = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
+            let d = CGPoint(x: rect.midX, y: rect.maxY + Self.buttonGap)
+            let dr = Self.deleteRadius
             context.setFillColor(NSColor.systemRed.cgColor)
-            context.fillEllipse(in: circle)
+            context.fillEllipse(in: CGRect(x: d.x - dr, y: d.y - dr, width: dr * 2, height: dr * 2))
             context.setStrokeColor(NSColor.white.cgColor)
             context.setLineWidth(1.6)
-            let k = r * 0.42
-            context.move(to: CGPoint(x: c.x - k, y: c.y - k))
-            context.addLine(to: CGPoint(x: c.x + k, y: c.y + k))
-            context.move(to: CGPoint(x: c.x - k, y: c.y + k))
-            context.addLine(to: CGPoint(x: c.x + k, y: c.y - k))
+            let k = dr * 0.42
+            context.move(to: CGPoint(x: d.x - k, y: d.y - k))
+            context.addLine(to: CGPoint(x: d.x + k, y: d.y + k))
+            context.move(to: CGPoint(x: d.x - k, y: d.y + k))
+            context.addLine(to: CGPoint(x: d.x + k, y: d.y - k))
+            context.strokePath()
+
+            // Rotate grip (accent circle with a curved arrow) below the stamp
+            let g = CGPoint(x: rect.midX, y: rect.minY - Self.buttonGap)
+            let gr = Self.rotateRadius
+            context.setFillColor(accent)
+            context.fillEllipse(in: CGRect(x: g.x - gr, y: g.y - gr, width: gr * 2, height: gr * 2))
+            context.setStrokeColor(NSColor.white.cgColor)
+            context.setLineWidth(1.5)
+            context.addArc(center: g, radius: gr * 0.5,
+                           startAngle: .pi * 0.35, endAngle: .pi * 1.75, clockwise: false)
+            context.strokePath()
+            let tip = CGPoint(x: g.x + gr * 0.5 * cos(.pi * 0.35), y: g.y + gr * 0.5 * sin(.pi * 0.35))
+            context.move(to: CGPoint(x: tip.x - 2.4, y: tip.y + 1.0))
+            context.addLine(to: tip)
+            context.addLine(to: CGPoint(x: tip.x + 1.2, y: tip.y - 2.4))
             context.strokePath()
         }
         context.restoreGState()
@@ -164,8 +259,16 @@ final class DocumentModel: ObservableObject {
     @Published var docRevision = 0
     @Published var canUndo = false
     @Published var canRedo = false
+    /// Acrobat-style text tool: click into the page, then type right there.
+    @Published var textToolActive = false
+    @Published var textToolFontSize: CGFloat = 14
+    /// True while the inline editor has focus (drives the toolbar size control).
+    @Published var isEditingText = false
 
     weak var pdfView: PDFView?
+    /// Set by the PDF view so the model can close an open inline text editor
+    /// before it swaps or mutates the document (true = commit, false = discard).
+    var finishInlineEditing: ((Bool) -> Void)?
     private var annotationsByID: [UUID: ImageStampAnnotation] = [:]
 
     let undoManager = UndoManager()
@@ -220,6 +323,8 @@ final class DocumentModel: ObservableObject {
     }
 
     func open(url: URL) {
+        // An open editor belongs to the outgoing document; keep what was typed.
+        finishInlineEditing?(true)
         guard confirmDiscardIfNeeded() else { return }
         guard let doc = PDFDocument(url: url) else { return }
         document = doc
@@ -286,6 +391,8 @@ final class DocumentModel: ObservableObject {
 
     func save(to url: URL) {
         guard let doc = document else { return }
+        // Saving reloads the document, which would orphan an open editor.
+        finishInlineEditing?(true)
         do {
             try exportCurrentState(to: url)
             // Remember the visible page so the view doesn't jump to page 1.
@@ -334,7 +441,8 @@ final class DocumentModel: ObservableObject {
         let height = width * aspect
         let rect = CGRect(x: pagePoint.x - width / 2, y: pagePoint.y - height / 2,
                           width: width, height: height)
-        let stamp = PlacedStamp(id: UUID(), page: page, rect: rect, image: pending.image)
+        let stamp = PlacedStamp(id: UUID(), page: page, rect: rect, image: pending.image,
+                                text: pending.text, fontSize: pending.fontSize)
         pendingStamp = nil
         restoreStamp(stamp)
         select(stamp.id)
@@ -343,7 +451,7 @@ final class DocumentModel: ObservableObject {
     /// Adds (or re-adds after undo) a stamp; inverse of removeStamp.
     func restoreStamp(_ stamp: PlacedStamp) {
         let annotation = ImageStampAnnotation(image: stamp.image, stampID: stamp.id,
-                                              bounds: ImageStampAnnotation.annotationBounds(for: stamp.rect))
+                                              imageRect: stamp.rect, rotation: stamp.rotation)
         stamp.page.addAnnotation(annotation)
         annotationsByID[stamp.id] = annotation
         stamps.append(stamp)
@@ -376,7 +484,14 @@ final class DocumentModel: ObservableObject {
     }
 
     func stamp(at pagePoint: CGPoint, page: PDFPage) -> PlacedStamp? {
-        stamps.last { $0.page === page && $0.rect.insetBy(dx: -6, dy: -6).contains(pagePoint) }
+        stamps.last { stamp in
+            guard stamp.page === page else { return false }
+            // Undo the rotation, then hit-test against the upright rect.
+            let center = CGPoint(x: stamp.rect.midX, y: stamp.rect.midY)
+            let local = ImageStampAnnotation.rotate(point: pagePoint, around: center,
+                                                    degrees: -stamp.rotation)
+            return stamp.rect.insetBy(dx: -6, dy: -6).contains(local)
+        }
     }
 
     func select(_ id: UUID?) {
@@ -388,31 +503,48 @@ final class DocumentModel: ObservableObject {
         }
     }
 
-    /// Live update while dragging/resizing – no undo registration.
-    func updateRect(_ rect: CGRect, for id: UUID) {
+    /// Live update while dragging/resizing/rotating – no undo registration.
+    func updateRect(_ rect: CGRect, rotation: CGFloat? = nil, for id: UUID) {
         guard let idx = stamps.firstIndex(where: { $0.id == id }) else { return }
         stamps[idx].rect = rect
-        annotationsByID[id]?.bounds = ImageStampAnnotation.annotationBounds(for: rect)
+        if let rotation { stamps[idx].rotation = rotation }
+        annotationsByID[id]?.update(imageRect: rect, rotation: stamps[idx].rotation)
         hasChanges = true
     }
 
-    /// Called once a drag/resize gesture finishes; registers a single undo step.
-    func commitRectChange(id: UUID, from oldRect: CGRect) {
-        guard let stamp = stamps.first(where: { $0.id == id }), stamp.rect != oldRect else { return }
+    func updateRotation(_ degrees: CGFloat, for id: UUID) {
+        guard let stamp = stamps.first(where: { $0.id == id }) else { return }
+        updateRect(stamp.rect, rotation: degrees, for: id)
+    }
+
+    /// Called once a drag/resize/rotate gesture finishes; registers one undo step.
+    func commitRectChange(id: UUID, from oldRect: CGRect, oldRotation: CGFloat? = nil) {
+        guard let stamp = stamps.first(where: { $0.id == id }) else { return }
+        let previousRotation = oldRotation ?? stamp.rotation
+        guard stamp.rect != oldRect || stamp.rotation != previousRotation else { return }
         undoManager.registerUndo(withTarget: self) { model in
-            MainActor.assumeIsolated { model.setRect(id: id, to: oldRect) }
+            MainActor.assumeIsolated { model.setRect(id: id, to: oldRect, rotation: previousRotation) }
         }
         refreshUndoState()
     }
 
-    func setRect(id: UUID, to rect: CGRect) {
+    func setRect(id: UUID, to rect: CGRect, rotation: CGFloat? = nil) {
         guard let stamp = stamps.first(where: { $0.id == id }) else { return }
-        let old = stamp.rect
+        let oldRect = stamp.rect
+        let oldRotation = stamp.rotation
         undoManager.registerUndo(withTarget: self) { model in
-            MainActor.assumeIsolated { model.setRect(id: id, to: old) }
+            MainActor.assumeIsolated { model.setRect(id: id, to: oldRect, rotation: oldRotation) }
         }
-        updateRect(rect, for: id)
+        updateRect(rect, rotation: rotation, for: id)
         refreshUndoState()
+    }
+
+    /// Rotates the selected stamp by a fixed step (toolbar buttons / shortcuts).
+    func rotateSelected(by degrees: CGFloat) {
+        guard let stamp = selectedStamp else { return }
+        let normalized = ((stamp.rotation + degrees).truncatingRemainder(dividingBy: 360) + 360)
+            .truncatingRemainder(dividingBy: 360)
+        setRect(id: stamp.id, to: stamp.rect, rotation: normalized)
     }
 
     func resizeSelected(width: CGFloat) {
@@ -431,21 +563,62 @@ final class DocumentModel: ObservableObject {
 
     // MARK: - Text / Datum
 
+    /// Turns text into a placed stamp at the given page position.
+    /// `origin` is the lower-left corner of the text in page coordinates.
+    @discardableResult
+    func placeText(_ text: String, fontSize: CGFloat, at origin: CGPoint,
+                   on page: PDFPage, replacing existingID: UUID? = nil) -> UUID? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let png = ImageUtils.renderText(trimmed, fontSize: fontSize),
+              let image = NSImage(data: png) else { return nil }
+
+        var rotation: CGFloat = 0
+        // renderText draws at 3x, so a third of the pixel size is the point size.
+        let size = CGSize(width: image.size.width / 3, height: image.size.height / 3)
+        var rect = CGRect(origin: origin, size: size)
+
+        let isReplacement = existingID != nil && stamps.contains { $0.id == existingID }
+        // Replacing = remove + add; group them so one Cmd+Z undoes the edit.
+        if isReplacement { undoManager.beginUndoGrouping() }
+        defer { if isReplacement { undoManager.endUndoGrouping() } }
+
+        if let existingID, let old = stamps.first(where: { $0.id == existingID }) {
+            rotation = old.rotation
+            // Keep the visual centre so edited text doesn't jump, especially
+            // when it is rotated (rotation pivots around the centre).
+            rect = CGRect(x: old.rect.midX - size.width / 2,
+                          y: old.rect.midY - size.height / 2,
+                          width: size.width, height: size.height)
+            removeStamp(id: existingID)
+        }
+        let stamp = PlacedStamp(id: UUID(), page: page, rect: rect, rotation: rotation,
+                                image: image, text: trimmed, fontSize: fontSize)
+        restoreStamp(stamp)
+        select(stamp.id)
+        return stamp.id
+    }
+
+    var todayString: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: Date())
+    }
+
     func startPlacingText(_ text: String, fontSize: CGFloat) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               let png = ImageUtils.renderText(trimmed, fontSize: fontSize),
               let image = NSImage(data: png) else { return }
-        // Rendered at 3x, so a third of the pixel width is the natural point size.
         pendingStamp = PendingStamp(image: image,
                                     defaultWidth: max(image.size.width / 3, 10),
-                                    label: trimmed)
+                                    label: trimmed,
+                                    text: trimmed,
+                                    fontSize: fontSize)
     }
 
     func startPlacingToday(fontSize: CGFloat = 14) {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        startPlacingText(formatter.string(from: Date()), fontSize: fontSize)
+        startPlacingText(todayString, fontSize: fontSize)
     }
 
     // MARK: - Seiten-Operationen
@@ -461,6 +634,8 @@ final class DocumentModel: ObservableObject {
 
     func deletePage(_ index: Int) {
         guard let doc = document, doc.pageCount > 1, let page = doc.page(at: index) else { return }
+        // The editor may target the page that is about to vanish.
+        finishInlineEditing?(false)
         // Clear the selection widget first so no annotation keeps isSelectedUI
         // set while off-document (it would reappear selected after undo).
         select(nil)

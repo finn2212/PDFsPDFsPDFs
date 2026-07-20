@@ -9,6 +9,8 @@ enum SelfTest {
             try testStampFlatten()
             try testMergeAndSplit()
             try testRotationFlatten()
+            try testStampRotation()
+            try testRotatedResizeKeepsAnchor()
             try testTextRendering()
             print("SELFTEST PASS")
             exit(0)
@@ -100,7 +102,7 @@ enum SelfTest {
         }
         let annotation = ImageStampAnnotation(
             image: stampImage, stampID: UUID(),
-            bounds: ImageStampAnnotation.annotationBounds(for: CGRect(x: 100, y: 100, width: 50, height: 50)))
+            imageRect: CGRect(x: 100, y: 100, width: 50, height: 50), rotation: 0)
         page.addAnnotation(annotation)
 
         try PDFFlattener.flatten(document: doc, to: outURL)
@@ -215,6 +217,116 @@ enum SelfTest {
                         r: 0.7...1.0, g: 0.0...0.45, b: 0.0...0.45, what: "rotated top (red)")
         try assertColor(try pixel(rep, pageSize: outSize, x: 100, y: 50),
                         r: 0.0...0.5, g: 0.0...0.5, b: 0.65...1.0, what: "rotated bottom (blue)")
+    }
+
+    /// A wide stamp rotated by 90° must land tall in the flattened output,
+    /// and the rotated hit-test geometry must follow it.
+    private static func testStampRotation() throws {
+        let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+        let srcURL = try makePDF(name: "stamprot-src.pdf", size: CGSize(width: 400, height: 400), fill: white)
+        let outURL = dir.appendingPathComponent("stamprot-out.pdf")
+
+        guard let doc = PDFDocument(url: srcURL), let page = doc.page(at: 0) else {
+            throw TestError.message("could not open stamp rotation source")
+        }
+
+        // 120 x 30 red bar centred at (200, 200), rotated 90° → 30 wide, 120 tall.
+        let stampImage = NSImage(size: NSSize(width: 120, height: 30), flipped: false) { rect in
+            NSColor.red.setFill()
+            rect.fill()
+            return true
+        }
+        let rect = CGRect(x: 140, y: 185, width: 120, height: 30)
+        let annotation = ImageStampAnnotation(image: stampImage, stampID: UUID(),
+                                              imageRect: rect, rotation: 90)
+        page.addAnnotation(annotation)
+
+        // Bounds must cover the rotated image, otherwise PDFKit clips it.
+        let expected = ImageStampAnnotation.annotationBounds(for: rect, rotation: 90)
+        guard abs(expected.width - (30 + 2 * ImageStampAnnotation.pad)) < 1,
+              abs(expected.height - (120 + 2 * ImageStampAnnotation.pad)) < 1 else {
+            throw TestError.message("rotated annotation bounds wrong: \(expected)")
+        }
+
+        try PDFFlattener.flatten(document: doc, to: outURL)
+
+        guard let outDoc = PDFDocument(url: outURL), let outPage = outDoc.page(at: 0) else {
+            throw TestError.message("could not open rotated stamp output")
+        }
+        let pageSize = CGSize(width: 400, height: 400)
+        let rep = try rasterize(outPage, size: pageSize)
+
+        // Along the vertical axis the bar is now red far above/below centre …
+        try assertColor(try pixel(rep, pageSize: pageSize, x: 200, y: 250),
+                        r: 0.7...1.0, g: 0.0...0.4, b: 0.0...0.4, what: "rotated stamp above centre")
+        try assertColor(try pixel(rep, pageSize: pageSize, x: 200, y: 150),
+                        r: 0.7...1.0, g: 0.0...0.4, b: 0.0...0.4, what: "rotated stamp below centre")
+        // … and white where the unrotated bar used to extend horizontally.
+        try assertColor(try pixel(rep, pageSize: pageSize, x: 250, y: 200),
+                        r: 0.9...1.0, g: 0.9...1.0, b: 0.9...1.0, what: "beside rotated stamp")
+
+        // Hit-test geometry: a point inside the rotated bar maps into the rect.
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let inside = ImageStampAnnotation.rotate(point: CGPoint(x: 200, y: 250),
+                                                 around: center, degrees: -90)
+        guard rect.contains(inside) else {
+            throw TestError.message("rotated hit-test point not inside rect: \(inside)")
+        }
+        let outside = ImageStampAnnotation.rotate(point: CGPoint(x: 250, y: 200),
+                                                  around: center, degrees: -90)
+        guard !rect.contains(outside) else {
+            throw TestError.message("point beside rotated stamp wrongly hit-tested inside")
+        }
+    }
+
+    /// Dragging a corner of a rotated stamp must keep the opposite corner
+    /// visually fixed — otherwise the stamp drifts away across a drag.
+    private static func testRotatedResizeKeepsAnchor() throws {
+        let start = CGRect(x: 100, y: 100, width: 100, height: 50)
+        let rotation: CGFloat = 45
+        let aspect = start.height / start.width
+        // Grab the top-right corner; the bottom-left one must stay put.
+        let anchor = CGPoint(x: start.minX, y: start.minY)
+        let startCenter = CGPoint(x: start.midX, y: start.midY)
+        let fixedBefore = ImageStampAnnotation.rotate(point: anchor, around: startCenter,
+                                                      degrees: rotation)
+
+        var rect = start
+        // Simulate a drag in several steps, feeding each result back in like the
+        // view does, to catch cumulative drift.
+        for step in 1...8 {
+            let grabbed = CGPoint(x: start.maxX + CGFloat(step) * 6,
+                                  y: start.maxY + CGFloat(step) * 3)
+            let dragPoint = ImageStampAnnotation.rotate(point: grabbed, around: startCenter,
+                                                        degrees: rotation)
+            rect = ImageStampAnnotation.resizedRect(startRect: start, anchor: anchor,
+                                                    aspect: aspect, rotation: rotation,
+                                                    dragPoint: dragPoint)
+            // The anchored corner of the *resulting* rect must map to the same
+            // visual position it had before the drag.
+            let center = CGPoint(x: rect.midX, y: rect.midY)
+            let corner = CGPoint(x: rect.minX, y: rect.minY)
+            let fixedNow = ImageStampAnnotation.rotate(point: corner, around: center,
+                                                       degrees: rotation)
+            let drift = hypot(fixedNow.x - fixedBefore.x, fixedNow.y - fixedBefore.y)
+            guard drift < 0.01 else {
+                throw TestError.message("rotated resize drifted by \(drift) pt at step \(step)")
+            }
+        }
+        guard rect.width > start.width else {
+            throw TestError.message("rotated resize did not grow the stamp")
+        }
+        guard abs(rect.height / rect.width - aspect) < 0.001 else {
+            throw TestError.message("rotated resize broke the aspect ratio")
+        }
+
+        // Unrotated resize keeps the plain anchor corner exactly.
+        let plain = ImageStampAnnotation.resizedRect(startRect: start, anchor: anchor,
+                                                     aspect: aspect, rotation: 0,
+                                                     dragPoint: CGPoint(x: 260, y: 180))
+        guard abs(plain.minX - anchor.x) < 0.001, abs(plain.minY - anchor.y) < 0.001 else {
+            throw TestError.message("unrotated resize moved the anchor: \(plain)")
+        }
     }
 
     private static func testTextRendering() throws {
