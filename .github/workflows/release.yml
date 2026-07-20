@@ -61,7 +61,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          ASSETS=("dist/PDFsPDFsPDFs-$VERSION.zip" dist/appcast.xml)
+          # The version-less copy lets the website link to
+          # releases/latest/download/PDFsPDFsPDFs.zip forever. It is created
+          # only after the appcast exists, because generate_appcast scans
+          # dist/ and would read a second zip as another release entry.
+          mkdir -p dist/download
+          cp "dist/PDFsPDFsPDFs-$VERSION.zip" dist/download/PDFsPDFsPDFs.zip
+          ASSETS=("dist/PDFsPDFsPDFs-$VERSION.zip" dist/download/PDFsPDFsPDFs.zip dist/appcast.xml)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
           else

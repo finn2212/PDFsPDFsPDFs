@@ -27,6 +27,7 @@ fi
 
 ZIP="dist/PDFsPDFsPDFs-$VERSION.zip"
 rm -f dist/PDFsPDFsPDFs-*.zip dist/appcast.xml
+rm -rf dist/download
 ditto -c -k --sequesterRsrc --keepParent dist/PDFsPDFsPDFs.app "$ZIP"
 
 # generate_appcast signs the zip with the EdDSA key from the keychain
@@ -44,12 +45,20 @@ grep -q "sparkle:edSignature" dist/appcast.xml || {
 }
 echo "Created $ZIP + dist/appcast.xml"
 
+# A second copy under a version-less name, so the website can link to
+# releases/latest/download/PDFsPDFsPDFs.zip and never needs updating.
+# It lives in a subdirectory because generate_appcast scans dist/ for zips
+# and would otherwise read this copy as a second release entry.
+STABLE="dist/download/PDFsPDFsPDFs.zip"
+mkdir -p dist/download
+cp "$ZIP" "$STABLE"
+
 if [ "$2" = "--publish" ]; then
-  gh release create "v$VERSION" "$ZIP" dist/appcast.xml \
+  gh release create "v$VERSION" "$ZIP" "$STABLE" dist/appcast.xml \
     -R "$REPO" \
     --title "PDFsPDFsPDFs $VERSION" \
     --generate-notes
   echo "Published release v$VERSION"
 else
-  echo "Publish with: gh release create v$VERSION $ZIP dist/appcast.xml -R $REPO --title \"PDFsPDFsPDFs $VERSION\" --generate-notes"
+  echo "Publish with: gh release create v$VERSION $ZIP $STABLE dist/appcast.xml -R $REPO --title \"PDFsPDFsPDFs $VERSION\" --generate-notes"
 fi
