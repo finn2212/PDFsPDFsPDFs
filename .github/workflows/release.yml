@@ -54,12 +54,18 @@ jobs:
             exit 1
           }
 
-      - name: Create GitHub release
+      # Idempotent: scripts/release.sh may already have published this tag
+      # locally, in which case we refresh the assets instead of failing.
+      - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/PDFsPDFsPDFs-$VERSION.zip" dist/appcast.xml \
-            --title "PDFsPDFsPDFs $VERSION" \
-            --generate-notes
+          ASSETS=("dist/PDFsPDFsPDFs-$VERSION.zip" dist/appcast.xml)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
+              --title "PDFsPDFsPDFs $VERSION" \
+              --generate-notes
+          fi
