@@ -58,7 +58,11 @@ jobs:
       # stays the sole Sparkle update artifact; the .dmg is only a human download.
       - name: Build installer DMG
         run: |
-          python3 -m pip install --user dmgbuild
+          # The runner's Python is externally managed (PEP 668), so install
+          # dmgbuild into a venv and put it on PATH for make_dmg.sh.
+          python3 -m venv /tmp/dmgvenv
+          /tmp/dmgvenv/bin/pip install --quiet dmgbuild
+          export PATH="/tmp/dmgvenv/bin:$PATH"
           ./scripts/make_dmg.sh "${GITHUB_REF_NAME#v}"
 
       # Idempotent: scripts/release.sh may already have published this tag
