@@ -1,5 +1,7 @@
 import AppKit
+import ImageIO
 import PDFKit
+import UniformTypeIdentifiers
 
 /// Headless verification of the core PDF pipeline: stamping + flattening,
 /// merging, splitting, page rotation and text rendering.
@@ -12,6 +14,11 @@ enum SelfTest {
             try testStampRotation()
             try testRotatedResizeKeepsAnchor()
             try testTextRendering()
+            try testConvertPageSize()
+            try testConvertExifOrientation()
+            try testConvertMultiFrame()
+            try testConvertRejectsPDFInput()
+            try testPDFToImageExport()
             print("SELFTEST PASS")
             exit(0)
         } catch {
@@ -339,5 +346,228 @@ enum SelfTest {
               let strokeImage = NSImage(data: strokePNG), strokeImage.size.width > 0 else {
             throw TestError.message("stroke rendering produced no image")
         }
+    }
+
+    // MARK: - Converter
+
+    /// Two coloured halves, so orientation can be checked by probing pixels.
+    private static func makeCGImage(width: Int, height: Int,
+                                    left: CGColor, right: CGColor) throws -> CGImage {
+        guard let ctx = CGContext(data: nil, width: width, height: height,
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else {
+            throw TestError.message("could not create bitmap context")
+        }
+        ctx.setFillColor(left)
+        ctx.fill(CGRect(x: 0, y: 0, width: width / 2, height: height))
+        ctx.setFillColor(right)
+        ctx.fill(CGRect(x: width / 2, y: 0, width: width - width / 2, height: height))
+        guard let image = ctx.makeImage() else {
+            throw TestError.message("could not render bitmap")
+        }
+        return image
+    }
+
+    private static func writeImage(_ images: [CGImage], name: String, type: UTType,
+                                   properties: [CFString: Any] = [:]) throws -> URL {
+        let url = dir.appendingPathComponent(name)
+        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString,
+                                                         images.count, nil) else {
+            throw TestError.message("could not create image destination for \(name)")
+        }
+        for image in images {
+            CGImageDestinationAddImage(dest, image, properties as CFDictionary)
+        }
+        guard CGImageDestinationFinalize(dest) else {
+            throw TestError.message("could not write \(name)")
+        }
+        return url
+    }
+
+    /// Renders a page through the same robust page.draw path the converter and
+    /// Preview use. Unlike page.thumbnail(of:for:), it applies no colour management
+    /// or smoothing, so flat fills read back as the exact device colours — the
+    /// thumbnail path shifts pure green to ~(0.51, 0.95, 0.30) and would fail on a
+    /// correct converter.
+    private static func renderPageRGB(_ page: PDFPage, pixelsWide: Int, pixelsHigh: Int) throws -> CGImage {
+        guard let ctx = CGContext(data: nil, width: pixelsWide, height: pixelsHigh,
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw TestError.message("could not create rgb render context")
+        }
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: pixelsWide, height: pixelsHigh))
+        let bounds = page.bounds(for: .mediaBox)
+        ctx.scaleBy(x: CGFloat(pixelsWide) / bounds.width, y: CGFloat(pixelsHigh) / bounds.height)
+        page.draw(with: .mediaBox, to: ctx)
+        guard let image = ctx.makeImage() else { throw TestError.message("could not rasterize page via draw") }
+        return image
+    }
+
+    /// Samples a device-RGB pixel at fractional (x, y-from-top), returning 0...1 components.
+    private static func sampleRGB(_ image: CGImage, fx: Double, fyFromTop: Double) throws -> (r: Double, g: Double, b: Double) {
+        let w = image.width, h = image.height
+        guard let ctx = CGContext(data: nil, width: w, height: h,
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw TestError.message("could not create sampling context")
+        }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let raw = ctx.data else { throw TestError.message("could not read sampled pixels") }
+        let x = min(w - 1, max(0, Int(Double(w) * fx)))
+        let y = min(h - 1, max(0, Int(Double(h) * fyFromTop)))
+        let buf = raw.assumingMemoryBound(to: UInt8.self)
+        let o = y * ctx.bytesPerRow + x * 4
+        return (Double(buf[o]) / 255, Double(buf[o + 1]) / 255, Double(buf[o + 2]) / 255)
+    }
+
+    private static func assertRGB(_ c: (r: Double, g: Double, b: Double),
+                                  r: ClosedRange<Double>, g: ClosedRange<Double>, b: ClosedRange<Double>,
+                                  what: String) throws {
+        guard r.contains(c.r), g.contains(c.g), b.contains(c.b) else {
+            throw TestError.message("\(what): unexpected color (\(c.r), \(c.g), \(c.b))")
+        }
+    }
+
+    /// The media box must come from the chosen page size, not from the CGPDFContext
+    /// default. Passing it as NSValue instead of CFData fails silently and yields
+    /// 612x792 US Letter on every page.
+    private static func testConvertPageSize() throws {
+        let image = try makeCGImage(width: 400, height: 400,
+                                    left: CGColor(red: 1, green: 0, blue: 0, alpha: 1),
+                                    right: CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+        let src = try writeImage([image], name: "conv-square.png", type: .png)
+        let out = dir.appendingPathComponent("conv-a4.pdf")
+
+        var options = ImageToPDFOptions()
+        options.pageSize = .fitA4
+        let result = try ImageToPDF.convert(inputs: [src], to: out, options: options)
+
+        guard result.pageCount == 1 else {
+            throw TestError.message("expected 1 page, got \(result.pageCount)")
+        }
+        guard let doc = PDFDocument(url: out), let page = doc.page(at: 0) else {
+            throw TestError.message("converted PDF invalid")
+        }
+        let box = page.bounds(for: .mediaBox)
+        guard abs(box.width - 595.276) < 1, abs(box.height - 841.89) < 1 else {
+            throw TestError.message("expected A4 media box, got \(box.size)")
+        }
+
+        // Square image on portrait A4: full width, centred band. Sample the vertical
+        // centre (fy 0.5), left half red and right half blue.
+        let rendered = try renderPageRGB(page, pixelsWide: 300, pixelsHigh: 424)
+        try assertRGB(try sampleRGB(rendered, fx: 0.25, fyFromTop: 0.5),
+                      r: 0.7...1.0, g: 0.0...0.3, b: 0.0...0.3, what: "fitA4 left half")
+        try assertRGB(try sampleRGB(rendered, fx: 0.75, fyFromTop: 0.5),
+                      r: 0.0...0.3, g: 0.0...0.3, b: 0.7...1.0, what: "fitA4 right half")
+    }
+
+    /// EXIF orientation 6 is what every phone camera writes. Ignoring it puts photos
+    /// on their side, which no user reads as anything but a broken app.
+    private static func testConvertExifOrientation() throws {
+        // Stored landscape, left red / right green. Orientation 6 rotates 90° CW for
+        // display, so the page becomes portrait and red must end up on top.
+        let image = try makeCGImage(width: 200, height: 100,
+                                    left: CGColor(red: 1, green: 0, blue: 0, alpha: 1),
+                                    right: CGColor(red: 0, green: 1, blue: 0, alpha: 1))
+        let src = try writeImage([image], name: "conv-rot6.jpg", type: .jpeg,
+                                 properties: [kCGImagePropertyOrientation: 6])
+        let out = dir.appendingPathComponent("conv-rot6.pdf")
+
+        var options = ImageToPDFOptions()
+        options.pageSize = .pixels
+        _ = try ImageToPDF.convert(inputs: [src], to: out, options: options)
+
+        guard let doc = PDFDocument(url: out), let page = doc.page(at: 0) else {
+            throw TestError.message("rotated PDF invalid")
+        }
+        let box = page.bounds(for: .mediaBox)
+        guard abs(box.width - 100) < 1, abs(box.height - 200) < 1 else {
+            throw TestError.message("orientation 6 should give a 100x200 page, got \(box.size)")
+        }
+
+        // OS reference (CGImageSourceCreateThumbnailWithTransform) for this exact
+        // source: red at the top (255,39,0), green at the bottom (1,248,1).
+        let rendered = try renderPageRGB(page, pixelsWide: 100, pixelsHigh: 200)
+        try assertRGB(try sampleRGB(rendered, fx: 0.5, fyFromTop: 0.25),
+                      r: 0.7...1.0, g: 0.0...0.3, b: 0.0...0.3, what: "orientation 6 top")
+        try assertRGB(try sampleRGB(rendered, fx: 0.5, fyFromTop: 0.75),
+                      r: 0.0...0.3, g: 0.7...1.0, b: 0.0...0.3, what: "orientation 6 bottom")
+    }
+
+    /// PDFKit counts files, not frames: a three-page TIFF would become one page and
+    /// the other two would vanish without any error.
+    private static func testConvertMultiFrame() throws {
+        let red = CGColor(red: 1, green: 0, blue: 0, alpha: 1)
+        let blue = CGColor(red: 0, green: 0, blue: 1, alpha: 1)
+        let frames = try (0..<3).map { _ in try makeCGImage(width: 120, height: 80, left: red, right: blue) }
+        let src = try writeImage(frames, name: "conv-multi.tiff", type: .tiff)
+        let out = dir.appendingPathComponent("conv-multi.pdf")
+
+        let result = try ImageToPDF.convert(inputs: [src], to: out, options: ImageToPDFOptions())
+        guard result.pageCount == 3 else {
+            throw TestError.message("multi-frame TIFF should give 3 pages, got \(result.pageCount)")
+        }
+        guard let doc = PDFDocument(url: out), doc.pageCount == 3 else {
+            throw TestError.message("multi-frame PDF does not contain 3 pages")
+        }
+    }
+
+    /// A CGPDFContext that never began a page still writes a valid 811-byte file that
+    /// reads back as one blank page, so "no error" must not count as success.
+    private static func testConvertRejectsPDFInput() throws {
+        let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+        let pdf = try makePDF(name: "conv-input.pdf", size: CGSize(width: 200, height: 200), fill: white)
+        let out = dir.appendingPathComponent("conv-frompdf.pdf")
+
+        do {
+            _ = try ImageToPDF.convert(inputs: [pdf], to: out, options: ImageToPDFOptions())
+            throw TestError.message("converting a PDF input should fail, not produce a blank page")
+        } catch let error as ConvertError {
+            guard error == .noReadableInput else {
+                throw TestError.message("expected noReadableInput, got \(error)")
+            }
+        }
+        guard !FileManager.default.fileExists(atPath: out.path) else {
+            throw TestError.message("failed conversion left a file behind")
+        }
+    }
+
+    private static func testPDFToImageExport() throws {
+        let red = CGColor(red: 1, green: 0, blue: 0, alpha: 1)
+        let green = CGColor(red: 0, green: 1, blue: 0, alpha: 1)
+        let src = try makePDF(name: "conv-export.pdf", size: CGSize(width: 200, height: 100),
+                              fill: red, rightHalf: green)
+        guard let doc = PDFDocument(url: src) else {
+            throw TestError.message("could not open export source")
+        }
+        let folder = dir.appendingPathComponent("export-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        var options = PDFToImageOptions()
+        options.format = .png
+        options.dpi = 150
+        let result = try PDFToImage.convert(document: doc, baseName: "Page", into: folder, options: options)
+
+        guard result.outputs.count == 1, let url = result.outputs.first else {
+            throw TestError.message("expected one exported image, got \(result.outputs.count)")
+        }
+        guard let rep = NSBitmapImageRep(data: try Data(contentsOf: url)) else {
+            throw TestError.message("exported image is not readable")
+        }
+        // 200 pt at 150 dpi is 416.7 px, rounded to 417.
+        guard rep.pixelsWide == 417, rep.pixelsHigh == 208 else {
+            throw TestError.message("expected 417x208 px, got \(rep.pixelsWide)x\(rep.pixelsHigh)")
+        }
+        guard let left = rep.colorAt(x: 50, y: 100)?.usingColorSpace(.deviceRGB),
+              let right = rep.colorAt(x: 360, y: 100)?.usingColorSpace(.deviceRGB) else {
+            throw TestError.message("could not sample exported image")
+        }
+        try assertColor(left, r: 0.7...1.0, g: 0.0...0.4, b: 0.0...0.4, what: "export left half")
+        try assertColor(right, r: 0.0...0.4, g: 0.7...1.0, b: 0.0...0.4, what: "export right half")
     }
 }

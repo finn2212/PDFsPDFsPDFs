@@ -54,6 +54,13 @@ jobs:
             exit 1
           }
 
+      # Built after the appcast so generate_appcast never sees the .dmg — the .zip
+      # stays the sole Sparkle update artifact; the .dmg is only a human download.
+      - name: Build installer DMG
+        run: |
+          python3 -m pip install --user dmgbuild
+          ./scripts/make_dmg.sh "${GITHUB_REF_NAME#v}"
+
       # Idempotent: scripts/release.sh may already have published this tag
       # locally, in which case we refresh the assets instead of failing.
       - name: Create or update GitHub release
@@ -67,7 +74,9 @@ jobs:
           # dist/ and would read a second zip as another release entry.
           mkdir -p dist/download
           cp "dist/PDFsPDFsPDFs-$VERSION.zip" dist/download/PDFsPDFsPDFs.zip
-          ASSETS=("dist/PDFsPDFsPDFs-$VERSION.zip" dist/download/PDFsPDFsPDFs.zip dist/appcast.xml)
+          # make_dmg.sh already wrote dist/PDFsPDFsPDFs-$VERSION.dmg + dist/download/PDFsPDFsPDFs.dmg.
+          ASSETS=("dist/PDFsPDFsPDFs-$VERSION.zip" dist/download/PDFsPDFsPDFs.zip \
+                  "dist/PDFsPDFsPDFs-$VERSION.dmg" dist/download/PDFsPDFsPDFs.dmg dist/appcast.xml)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
           else
