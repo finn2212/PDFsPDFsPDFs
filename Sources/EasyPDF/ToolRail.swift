@@ -6,6 +6,7 @@ enum SideTool: String, CaseIterable, Identifiable {
     case merge
     case split
     case text
+    case convert
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum SideTool: String, CaseIterable, Identifiable {
         case .merge: return "plus.rectangle.on.rectangle"
         case .split: return "scissors"
         case .text: return "textformat"
+        case .convert: return "arrow.left.arrow.right.square"
         }
     }
 
@@ -73,6 +75,8 @@ struct ToolPanelView: View {
                 SplitPanel()
             case .text:
                 TextPanel()
+            case .convert:
+                ConvertPanel()
             }
         }
         .frame(width: 300)

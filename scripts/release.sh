@@ -26,7 +26,9 @@ fi
 ./build_app.sh
 
 ZIP="dist/PDFsPDFsPDFs-$VERSION.zip"
-rm -f dist/PDFsPDFsPDFs-*.zip dist/appcast.xml
+# Also clear any .dmg from a previous run: generate_appcast scans dist/ and would
+# otherwise read a stale disk image as an extra release entry.
+rm -f dist/PDFsPDFsPDFs-*.zip dist/*.dmg dist/appcast.xml
 rm -rf dist/download
 ditto -c -k --sequesterRsrc --keepParent dist/PDFsPDFsPDFs.app "$ZIP"
 
@@ -53,12 +55,19 @@ STABLE="dist/download/PDFsPDFsPDFs.zip"
 mkdir -p dist/download
 cp "$ZIP" "$STABLE"
 
+# Drag-to-Applications DMG for first-time installs. Built AFTER the appcast so
+# generate_appcast never sees the .dmg — the .zip stays the sole Sparkle update
+# artifact, while the .dmg is only a human download.
+./scripts/make_dmg.sh "$VERSION"
+DMG="dist/PDFsPDFsPDFs-$VERSION.dmg"
+DMG_STABLE="dist/download/PDFsPDFsPDFs.dmg"
+
 if [ "$2" = "--publish" ]; then
-  gh release create "v$VERSION" "$ZIP" "$STABLE" dist/appcast.xml \
+  gh release create "v$VERSION" "$ZIP" "$STABLE" "$DMG" "$DMG_STABLE" dist/appcast.xml \
     -R "$REPO" \
     --title "PDFsPDFsPDFs $VERSION" \
     --generate-notes
   echo "Published release v$VERSION"
 else
-  echo "Publish with: gh release create v$VERSION $ZIP $STABLE dist/appcast.xml -R $REPO --title \"PDFsPDFsPDFs $VERSION\" --generate-notes"
+  echo "Publish with: gh release create v$VERSION $ZIP $STABLE $DMG $DMG_STABLE dist/appcast.xml -R $REPO --title \"PDFsPDFsPDFs $VERSION\" --generate-notes"
 fi
