@@ -4,7 +4,8 @@ set -e
 cd "$(dirname "$0")"
 
 swift build -c release --arch arm64 --arch x86_64
-BUILD_DIR=".build/apple/Products/Release"
+# Output dir differs between toolchains (.build/apple/... vs .build/out/...), so ask SwiftPM.
+BUILD_DIR="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
 
 APP="dist/PDFsPDFsPDFs.app"
 rm -rf "$APP" dist/EasyPDF.app
