@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-enum AssetKind {
+enum AssetKind: Hashable {
     case signature
     case initials
 
@@ -13,23 +13,43 @@ enum AssetKind {
     }
 }
 
-struct SignatureDrawingSheet: View {
-    let kind: AssetKind
-    let onSave: (Data) -> Void
-    @Environment(\.dismiss) private var dismiss
+/// Drawing surface for signatures. Shows the existing asset until the first
+/// new stroke replaces it.
+struct SignatureCanvas: View {
+    @Binding var strokes: [[CGPoint]]
+    let existing: NSImage?
+    let size: CGSize
+    let hint: String
 
-    @State private var strokes: [[CGPoint]] = []
     @State private var currentStroke: [CGPoint] = []
 
-    private let canvasSize = CGSize(width: 560, height: 220)
-
     var body: some View {
-        VStack(spacing: 14) {
-            Text(kind.drawTitle)
-                .font(.headline)
-            Text(loc("draw.hint"))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        ZStack(alignment: .bottomLeading) {
+            Color.white
+            // Signing line, like on paper.
+            HStack(spacing: 8) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                Rectangle().frame(height: 1)
+            }
+            .foregroundStyle(Color.black.opacity(0.25))
+            .padding(.horizontal, 24)
+            .padding(.bottom, 44)
+
+            if strokes.isEmpty && currentStroke.isEmpty {
+                if let existing {
+                    Image(nsImage: existing)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(24)
+                        .frame(width: size.width, height: size.height)
+                } else {
+                    Text(hint)
+                        .font(.callout)
+                        .foregroundStyle(Color.black.opacity(0.35))
+                        .frame(width: size.width, height: size.height)
+                }
+            }
 
             Canvas { ctx, _ in
                 let all = currentStroke.isEmpty ? strokes : strokes + [currentStroke]
@@ -45,52 +65,27 @@ struct SignatureDrawingSheet: View {
                                style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                 }
             }
-            .frame(width: canvasSize.width, height: canvasSize.height)
-            .background(Color.white)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.secondary.opacity(0.5), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        let p = value.location
-                        guard p.x >= 0, p.y >= 0,
-                              p.x <= canvasSize.width, p.y <= canvasSize.height else { return }
-                        currentStroke.append(p)
-                    }
-                    .onEnded { _ in
-                        if !currentStroke.isEmpty {
-                            strokes.append(currentStroke)
-                            currentStroke = []
-                        }
-                    }
-            )
-
-            HStack {
-                Button(loc("draw.clear")) {
-                    strokes = []
-                    currentStroke = []
-                }
-                .disabled(strokes.isEmpty && currentStroke.isEmpty)
-
-                Spacer()
-
-                Button(loc("draw.cancel")) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-
-                Button(loc("draw.save")) {
-                    if let png = ImageUtils.renderStrokes(strokes, canvasSize: canvasSize) {
-                        onSave(png)
-                    }
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(strokes.isEmpty)
-            }
         }
-        .padding(20)
+        .frame(width: size.width, height: size.height)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.15)))
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    let p = value.location
+                    guard p.x >= 0, p.y >= 0, p.x <= size.width, p.y <= size.height else { return }
+                    currentStroke.append(p)
+                }
+                .onEnded { _ in
+                    if !currentStroke.isEmpty {
+                        strokes.append(currentStroke)
+                        currentStroke = []
+                    }
+                }
+        )
+        .onHover { inside in
+            if inside { NSCursor.crosshair.push() } else { NSCursor.pop() }
+        }
     }
 }
 

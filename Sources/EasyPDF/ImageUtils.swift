@@ -144,6 +144,72 @@ enum ImageUtils {
         return rep.representation(using: .png, properties: [:])
     }
 
+    /// Script fonts for typed signatures, in order of preference; only the
+    /// installed ones are offered.
+    static let signatureFonts: [String] = [
+        "SnellRoundhand", "BradleyHandITCTT-Bold", "SavoyeLetPlain", "Noteworthy-Light",
+    ].filter { NSFont(name: $0, size: 12) != nil }
+
+    /// Renders a typed signature in a script font into a transparent PNG at 3x,
+    /// cropped to the ink (swashes reach far outside the typographic bounds).
+    static func renderSignature(_ text: String, fontName: String) -> Data? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let font = NSFont(name: fontName, size: 44) ?? NSFont.systemFont(ofSize: 44)
+        let attributed = NSAttributedString(string: trimmed, attributes: [
+            .font: font, .foregroundColor: NSColor.black,
+        ])
+        let bounds = attributed.boundingRect(with: NSSize(width: 4000, height: 400),
+                                             options: [.usesLineFragmentOrigin])
+        let padding: CGFloat = 40
+        let size = CGSize(width: ceil(bounds.width) + padding * 2,
+                          height: ceil(bounds.height) + padding * 2)
+        let scale: CGFloat = 3
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale),
+            pixelsHigh: Int(size.height * scale), bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        let transform = NSAffineTransform()
+        transform.scale(by: scale)
+        transform.concat()
+        attributed.draw(with: NSRect(x: padding, y: padding, width: bounds.width + 4,
+                                     height: bounds.height + 4),
+                        options: [.usesLineFragmentOrigin])
+        NSGraphicsContext.restoreGraphicsState()
+        guard let cg = rep.cgImage, let cropped = cropToInk(cg, padding: Int(6 * scale)) else {
+            return rep.representation(using: .png, properties: [:])
+        }
+        return NSBitmapImageRep(cgImage: cropped).representation(using: .png, properties: [:])
+    }
+
+    /// Crops an image to the bounding box of its non-transparent pixels.
+    static func cropToInk(_ image: CGImage, padding: Int) -> CGImage? {
+        let width = image.width, height = image.height
+        guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                  bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let buffer = ctx.data else { return nil }
+        let pixels = buffer.bindMemory(to: UInt8.self, capacity: width * height * 4)
+        var minX = width, minY = height, maxX = -1, maxY = -1
+        for y in 0..<height {
+            for x in 0..<width where pixels[(y * width + x) * 4 + 3] > 8 {
+                minX = min(minX, x); maxX = max(maxX, x)
+                minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return nil }
+        // Buffer rows run top-down, matching CGImage cropping coordinates.
+        let rect = CGRect(x: max(0, minX - padding), y: max(0, minY - padding),
+                          width: min(width, maxX + padding + 1) - max(0, minX - padding),
+                          height: min(height, maxY + padding + 1) - max(0, minY - padding))
+        return image.cropping(to: rect)
+    }
+
     static func pngData(from image: NSImage) -> Data? {
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff) else { return nil }

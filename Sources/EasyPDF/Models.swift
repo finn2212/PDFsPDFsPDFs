@@ -19,7 +19,7 @@ final class ProfileStore: ObservableObject {
 
     private let fileURL: URL
 
-    init() {
+    convenience init() {
         let support = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = support.appendingPathComponent("PDFsPDFsPDFs", isDirectory: true)
@@ -29,6 +29,10 @@ final class ProfileStore: ObservableObject {
            FileManager.default.fileExists(atPath: legacyDir.path) {
             try? FileManager.default.moveItem(at: legacyDir, to: dir)
         }
+        self.init(directory: dir)
+    }
+
+    init(directory dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("persons.json")
         load()
