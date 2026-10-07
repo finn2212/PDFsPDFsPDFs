@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Window root: start screen without a document, otherwise the document in
 /// one of its two views. Owns every sheet and dialog, so only one is ever up.
+@MainActor
 struct ContentView: View {
     @EnvironmentObject var store: ProfileStore
     @EnvironmentObject var doc: DocumentModel
@@ -68,6 +69,7 @@ struct ContentView: View {
 }
 
 /// Window toolbar: view switch in the middle, Save and Share on the right.
+@MainActor
 private struct WindowToolbar: ToolbarContent {
     @EnvironmentObject var doc: DocumentModel
 

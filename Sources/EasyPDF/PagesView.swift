@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 /// The "Pages" view: one place for every page operation — select, reorder by
 /// drag, rotate, delete, save a selection, split at cut marks, insert files.
+@MainActor
 struct PagesView: View {
     @EnvironmentObject var doc: DocumentModel
 
@@ -18,6 +19,7 @@ struct PagesView: View {
 
 // MARK: - Tool strip
 
+@MainActor
 private struct PagesToolStrip: View {
     @EnvironmentObject var doc: DocumentModel
 
@@ -111,6 +113,7 @@ private struct PagesToolStrip: View {
 
 // MARK: - Grid
 
+@MainActor
 private struct PageGrid: View {
     @EnvironmentObject var doc: DocumentModel
     /// Insertion index shown while something is dragged over the grid.
@@ -160,6 +163,7 @@ private struct PageGrid: View {
     }
 }
 
+@MainActor
 private struct PageCell: View {
     @EnvironmentObject var doc: DocumentModel
     let page: PDFPage
@@ -276,6 +280,7 @@ private struct PageCell: View {
 }
 
 /// Scissors in the gutter between two pages; toggles a cut after the page.
+@MainActor
 private struct CutMark: View {
     let isCut: Bool
     let action: () -> Void
@@ -357,6 +362,7 @@ private struct PageDropDelegate: DropDelegate {
 
 // MARK: - Context bar
 
+@MainActor
 private struct PagesContextRow: View {
     @EnvironmentObject var doc: DocumentModel
 

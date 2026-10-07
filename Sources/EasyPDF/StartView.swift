@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Shown when no document is open: the three jobs that start without a
 /// document, recent files, and the whole window as a drop zone.
+@MainActor
 struct StartView: View {
     @EnvironmentObject var doc: DocumentModel
     @State private var isTargeted = false
@@ -65,6 +66,7 @@ struct StartView: View {
     }
 }
 
+@MainActor
 private struct StartCard: View {
     let icon: String
     let title: String
@@ -125,6 +127,7 @@ private struct StartCard: View {
     }
 }
 
+@MainActor
 private struct RecentFilesList: View {
     @EnvironmentObject var doc: DocumentModel
 
@@ -155,6 +158,7 @@ private struct RecentFilesList: View {
     }
 }
 
+@MainActor
 private struct RecentRow: View {
     let url: URL
     let action: () -> Void

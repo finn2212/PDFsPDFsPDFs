@@ -19,6 +19,7 @@ extension Person {
 // MARK: - Picker (popover)
 
 /// Quick pick: every saved signature and its initials as large tiles.
+@MainActor
 struct SignaturePicker: View {
     @EnvironmentObject var doc: DocumentModel
     @EnvironmentObject var store: ProfileStore
@@ -81,6 +82,7 @@ struct SignaturePicker: View {
     }
 }
 
+@MainActor
 private struct PersonTiles: View {
     let person: Person
     let place: (Person, AssetKind) -> Void
@@ -133,6 +135,7 @@ private struct PersonTiles: View {
     }
 }
 
+@MainActor
 private struct AssetTile: View {
     let image: NSImage?
     let caption: String
@@ -181,6 +184,7 @@ private struct AssetTile: View {
 
 /// One sheet for creating or editing a signature and initials: draw, type
 /// or import an image. No nested sheets; the name is optional.
+@MainActor
 struct SignatureEditorSheet: View {
     @EnvironmentObject var store: ProfileStore
     @EnvironmentObject var doc: DocumentModel
@@ -314,6 +318,7 @@ struct AssetDraft {
     }
 }
 
+@MainActor
 private struct AssetEditor: View {
     @Binding var draft: AssetDraft
     let kind: AssetKind

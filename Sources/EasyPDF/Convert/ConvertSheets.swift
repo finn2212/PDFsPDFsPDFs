@@ -122,6 +122,7 @@ final class ConvertModel: ObservableObject {
 
 /// Images → PDF as a sheet: file list (drag to sort), page size and quality.
 /// The result is saved and opened as the current document.
+@MainActor
 struct ImagesToPDFSheet: View {
     @EnvironmentObject var doc: DocumentModel
     @Environment(\.dismiss) private var dismiss
@@ -257,6 +258,7 @@ struct ImagesToPDFSheet: View {
 }
 
 /// PDF → images as a sheet (File › Export as images).
+@MainActor
 struct ExportImagesSheet: View {
     @EnvironmentObject var doc: DocumentModel
     @Environment(\.dismiss) private var dismiss
@@ -355,6 +357,7 @@ struct ExportImagesSheet: View {
 }
 
 /// Progress, error and warnings of a running or finished conversion.
+@MainActor
 private struct ConvertFeedback: View {
     @ObservedObject var model: ConvertModel
 

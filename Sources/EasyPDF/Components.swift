@@ -9,6 +9,7 @@ struct ToolButtonStyle: ButtonStyle {
         ToolButtonBody(configuration: configuration, isOn: isOn)
     }
 
+    @MainActor
     private struct ToolButtonBody: View {
         let configuration: Configuration
         let isOn: Bool
@@ -42,6 +43,7 @@ struct ToolButtonStyle: ButtonStyle {
 /// Horizontal bar under the window toolbar that holds the tools of the
 /// current view. Shows labels when they fit, icons only (with tooltips)
 /// in narrow windows.
+@MainActor
 struct ToolStrip<Leading: View, Trailing: View>: View {
     @ViewBuilder var leading: (Bool) -> Leading
     @ViewBuilder var trailing: (Bool) -> Trailing
@@ -79,6 +81,7 @@ struct StripLabelStyle: LabelStyle {
     }
 }
 
+@MainActor
 struct StripDivider: View {
     var body: some View {
         Divider().frame(height: 18).padding(.horizontal, 6)
@@ -88,6 +91,7 @@ struct StripDivider: View {
 /// Fixed row under the tool strip: the current state in words plus the
 /// controls that belong to it. It never covers the page — a floating bar
 /// sat right on top of signature lines at the bottom of a page.
+@MainActor
 struct ContextRow<Leading: View, Trailing: View>: View {
     let leading: Leading
     let trailing: Trailing
@@ -113,6 +117,7 @@ struct ContextRow<Leading: View, Trailing: View>: View {
     }
 }
 
+@MainActor
 struct RowDivider: View {
     var body: some View {
         Divider().frame(height: 16)
@@ -120,6 +125,7 @@ struct RowDivider: View {
 }
 
 /// Small borderless icon button for the context row.
+@MainActor
 struct BarIconButton: View {
     let systemImage: String
     let help: String
@@ -143,6 +149,7 @@ struct BarIconButton: View {
 }
 
 /// − 14 pt + stepper used for text size and stamp size.
+@MainActor
 struct SizeStepper: View {
     let label: String
     let value: String
@@ -163,6 +170,7 @@ struct SizeStepper: View {
     }
 }
 
+@MainActor
 struct AppLogoView: View {
     var size: CGFloat = 128
 
@@ -184,6 +192,7 @@ struct AppLogoView: View {
 }
 
 /// Highlight shown while files are dragged over a drop target.
+@MainActor
 struct DropHighlight: View {
     var cornerRadius: CGFloat = 16
 
@@ -244,6 +253,7 @@ enum UITestTargets {
     }
 }
 
+@MainActor
 private struct UITestTargetModifier: ViewModifier {
     let id: String
     let space: CoordinateSpace

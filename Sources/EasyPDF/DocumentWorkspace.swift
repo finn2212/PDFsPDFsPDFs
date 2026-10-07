@@ -3,6 +3,7 @@ import SwiftUI
 
 /// The "Document" view: sign and fill in. Tool strip on top, optional page
 /// strip for navigation on the left, the page canvas, and a context bar.
+@MainActor
 struct DocumentWorkspace: View {
     @EnvironmentObject var doc: DocumentModel
     @AppStorage("showsPageStrip") private var showsPageStrip = true
@@ -32,6 +33,7 @@ struct DocumentWorkspace: View {
 
 // MARK: - Tool strip
 
+@MainActor
 private struct DocumentToolStrip: View {
     @EnvironmentObject var doc: DocumentModel
     @EnvironmentObject var store: ProfileStore
@@ -118,6 +120,7 @@ private struct DocumentToolStrip: View {
 // MARK: - Context row
 
 /// What is going on right now, and the controls for it.
+@MainActor
 struct DocumentContextRow: View {
     @EnvironmentObject var doc: DocumentModel
 
@@ -213,6 +216,7 @@ struct DocumentContextRow: View {
 
 // MARK: - Page strip (navigation only)
 
+@MainActor
 private struct PageStrip: View {
     @EnvironmentObject var doc: DocumentModel
     @State private var currentPage = 0
@@ -262,6 +266,7 @@ private struct PageStrip: View {
 
 /// Renders a page thumbnail (with its annotations) and re-renders when the
 /// document revision changes.
+@MainActor
 struct PageThumbnail: View {
     let page: PDFPage
     let revision: Int

@@ -15,6 +15,7 @@ enum AssetKind: Hashable {
 
 /// Drawing surface for signatures. Shows the existing asset until the first
 /// new stroke replaces it.
+@MainActor
 struct SignatureCanvas: View {
     @Binding var strokes: [[CGPoint]]
     let existing: NSImage?
