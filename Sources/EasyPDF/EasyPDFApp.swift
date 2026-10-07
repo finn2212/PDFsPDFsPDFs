@@ -139,12 +139,7 @@ struct EasyPDFApp: App {
 
             CommandMenu(loc("menu.tools")) {
                 Button(loc("tool.sign")) {
-                    doc.mode = .document
-                    if store.persons.contains(where: { $0.signatureImage != nil }) {
-                        doc.showSignaturePicker = true
-                    } else {
-                        doc.signatureEditor = SignatureEditorRequest(person: Person(), kind: .signature)
-                    }
+                    SignatureActions.sign(doc: doc, store: store)
                 }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 .disabled(doc.document == nil)

@@ -53,24 +53,28 @@ private struct DocumentToolStrip: View {
 
             StripDivider()
 
-            Button {
-                if store.persons.contains(where: { $0.signatureImage != nil }) {
-                    doc.showSignaturePicker.toggle()
-                } else {
-                    // Nothing to choose from yet: go straight to creating one.
-                    doc.signatureEditor = SignatureEditorRequest(person: Person(), kind: .signature)
+            HStack(spacing: 0) {
+                // One click: the signature hangs on the cursor, next click places it.
+                Button {
+                    SignatureActions.sign(doc: doc, store: store)
+                } label: {
+                    Label(loc("tool.sign"), systemImage: "signature")
                 }
-            } label: {
-                Label(loc("tool.sign"), systemImage: "signature")
+                .buttonStyle(ToolButtonStyle(isOn: doc.pendingStamp != nil && doc.pendingStamp?.text == nil))
+                .uiTestTarget("tool.sign")
+                .help(loc("tool.sign.help"))
+
+                Menu {
+                    SignatureMenuItems()
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .padding(.horizontal, 4)
+                .help(loc("tool.sign.more"))
             }
-            .buttonStyle(ToolButtonStyle(isOn: doc.pendingStamp != nil && doc.pendingStamp?.text == nil))
-            .uiTestTarget("tool.sign")
-            .popover(isPresented: $doc.showSignaturePicker, arrowEdge: .bottom) {
-                SignaturePicker()
-                    .environmentObject(doc)
-                    .environmentObject(store)
-            }
-            .help(loc("tool.sign.help"))
 
             Button {
                 doc.textToolActive.toggle()
@@ -182,7 +186,8 @@ struct DocumentContextRow: View {
             }
         } else if doc.textToolActive {
             Image(systemName: "character.cursor.ibeam").foregroundStyle(Color.accentColor)
-            Text(loc("hint.textTool"))
+            let open = doc.openFieldCount
+            Text(open > 0 ? locCount("hint.fields", open) : loc("hint.textTool"))
             RowDivider()
             textSize
             Button(loc("action.done")) { doc.textToolActive = false }
@@ -201,6 +206,11 @@ struct DocumentContextRow: View {
             BarIconButton(systemImage: "xmark", help: loc("action.dismiss")) {
                 doc.formHintDismissed = true
             }
+        } else if doc.openFieldCount > 0 {
+            Image(systemName: "rectangle.and.pencil.and.ellipsis").foregroundStyle(Color.accentColor)
+            Text(locCount("hint.fieldsIdle", doc.openFieldCount))
+            Button(loc("tool.text")) { doc.textToolActive = true }
+                .controlSize(.small)
         } else {
             Text(loc("hint.idle")).foregroundStyle(.secondary)
         }

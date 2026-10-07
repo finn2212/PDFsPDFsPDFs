@@ -31,11 +31,15 @@ enum UITest {
         window = Snapshot.makeWindow(store: store, doc: doc, size: CGSize(width: 1240, height: 800))
         Snapshot.settle(0.8)
 
-        if ProcessInfo.processInfo.environment["UITEST_ACCURACY"] == nil {
-            textScenario(doc)
-            signatureScenario(doc, store: store)
+        if ProcessInfo.processInfo.environment["UITEST_FIELDS"] != nil {
+            fieldsScenario(doc)
+        } else {
+            if ProcessInfo.processInfo.environment["UITEST_ACCURACY"] == nil {
+                textScenario(doc)
+                signatureScenario(doc, store: store)
+            }
+            accuracyScenario(doc)
         }
-        accuracyScenario(doc)
 
         print(failures == 0 ? "UITEST PASS" : "UITEST FAIL (\(failures))")
         doc.hasChanges = false
@@ -183,24 +187,11 @@ enum UITest {
         guard let image = store.persons.first?.signatureImage else { return }
         let before = doc.stamps.count
 
-        // The real path: "Sign" button → popover → signature tile.
+        // The real path: one click on "Sign" hangs the signature on the cursor.
         press("tool.sign")
-        Snapshot.settle(0.6)
-        let popover = NSApp.windows.first { $0 !== window && $0.isVisible && String(describing: Swift.type(of: $0)).contains("Popover") }
-        check(doc.showSignaturePicker && popover != nil, "U · „Unterschreiben“ öffnet die Auswahl")
-        if let popover, let id = store.persons.first?.id,
-           let frame = UITestTargets.frames["tile.signature.\(id)"],
-           let host = findView(typeContaining: "HostingView", in: popover.contentView?.superview) {
-            Snapshot.capture(window: popover, to: outDir.appendingPathComponent("uitest-popover.png"))
-            let point = host.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
-            mouse(.leftMouseDown, at: point, in: popover)
-            mouse(.leftMouseUp, at: point, in: popover)
-            Snapshot.settle(0.6)
-        } else {
-            print("   (Popover oder Kachel nicht gefunden: popover \(popover != nil))")
-        }
-        check(doc.pendingStamp != nil && !doc.showSignaturePicker,
-              "U · Klick auf die Kachel schließt die Auswahl und startet das Platzieren")
+        Snapshot.settle(0.3)
+        check(doc.pendingStamp != nil && doc.pendingStamp?.text == nil,
+              "U · Klick auf „Unterschreiben“ hängt die Unterschrift an den Mauszeiger")
         if doc.pendingStamp == nil {
             doc.startPlacing(image: image, defaultWidth: 170, label: loc("signature.placeLabel", "Finn Stolle"))
         }
@@ -280,6 +271,53 @@ enum UITest {
                   "A · und nicht daneben (\(name))")
         }
         print("   crop box origin \(crop.origin)")
+    }
+
+    /// Field detection on a form without form fields: list what was found,
+    /// show it, fill it with clicks, Tab and Return.
+    private static func fieldsScenario(_ doc: DocumentModel) {
+        guard let page = doc.document?.page(at: 0), let pdfView = doc.pdfView else { return }
+        for _ in 0..<40 where doc.detectedFields[ObjectIdentifier(page)] == nil { Snapshot.settle(0.1) }
+        let fields = doc.openFields(on: page)
+        for f in fields {
+            print("   field \(f.kind) x \(Int(f.rect.minX))…\(Int(f.rect.maxX)) y \(Int(f.rect.minY))…\(Int(f.rect.maxY)) font \(Int(f.fontSize))")
+        }
+        press("tool.text")
+        pdfView.go(to: CGRect(x: 0, y: 380, width: 595, height: 420), on: page)
+        Snapshot.settle(0.4)
+        shot("F1-felder")
+        let typable = fields.filter { $0.kind != .checkbox }
+        guard typable.count >= 3, let checkbox = fields.first(where: { $0.kind == .checkbox }) else {
+            check(false, "F · Formular hat Textfelder und Kästchen")
+            return
+        }
+
+        // Click into the first field, type, Tab, type, Tab, type, Return.
+        click(page: page, at: CGPoint(x: typable[0].rect.midX, y: typable[0].rect.midY), in: pdfView)
+        check(doc.isEditingText, "F · Klick ins erste Feld öffnet das Eingabefeld")
+        type("Mustermann")
+        key("\t", code: 48)
+        check(doc.isEditingText && doc.stamps.count == 1, "F · Tab übernimmt und springt ins nächste Feld")
+        type("Max")
+        key("\t", code: 48)
+        type("Hauptstraße 1")
+        shot("F2-tippen")
+        key("\r", code: 36)
+        let texts = ["Mustermann", "Max", "Hauptstraße 1"]
+        for (field, text) in zip(typable.prefix(3), texts) {
+            let stamp = doc.stamps.first { $0.text == text }
+            let inside = stamp.map { field.rect.insetBy(dx: -4, dy: -5).contains(CGPoint(x: $0.rect.midX, y: $0.rect.midY)) } ?? false
+            check(inside, "F · „\(text)“ sitzt im erkannten Feld (\(field.kind))")
+        }
+
+        // Tick a checkbox with a click.
+        click(page: page, at: CGPoint(x: checkbox.rect.midX, y: checkbox.rect.midY), in: pdfView)
+        let tick = doc.stamps.first { $0.text == "✓" }
+        check(tick.map { checkbox.rect.insetBy(dx: -3, dy: -3).contains(CGPoint(x: $0.rect.midX, y: $0.rect.midY)) } ?? false,
+              "F · Klick ins Kästchen setzt ✓ mittig hinein")
+        check(doc.openFieldCount == fields.count - 4, "F · ausgefüllte Felder sind nicht mehr markiert (\(doc.openFieldCount) offen)")
+        doc.select(nil)
+        shot("F3-ausgefuellt")
     }
 
     private static func move(page: PDFPage, to pagePoint: CGPoint, in view: PDFView) {

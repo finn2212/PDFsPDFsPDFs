@@ -45,9 +45,6 @@ extension SnapshotScenario {
         }),
         SnapshotScenario(name: "new-01-start", prepare: { doc, _ in doc.close() }),
         SnapshotScenario(name: "new-02-document", prepare: { doc, _ in open(doc) }),
-        SnapshotScenario(name: "new-03-signature-picker", standalone: { doc, store in
-            AnyView(SignaturePicker().environmentObject(doc).environmentObject(store))
-        }),
         SnapshotScenario(name: "new-04-placing", prepare: { doc, _ in open(doc) }, afterShow: { doc, store in
             showBottom(doc)
             Snapshot.settle(0.4)

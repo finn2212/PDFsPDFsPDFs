@@ -367,7 +367,9 @@ final class DocumentModel: ObservableObject {
                 select(nil)
             } else if oldValue {
                 finishInlineEditing?(true)
+                hoveredFieldID = nil
             }
+            onFieldsChanged?()
         }
     }
     @Published var textToolFontSize: CGFloat = 14
@@ -383,8 +385,6 @@ final class DocumentModel: ObservableObject {
     @Published var pendingDrop: PendingDrop?
     @Published var imagesRequest: ImagesRequest?
     @Published var exportImagesRequested = false
-    /// Signature picker popover (also opened from the Tools menu).
-    @Published var showSignaturePicker = false
     /// Signature editor sheet: the person being edited, and which asset.
     @Published var signatureEditor: SignatureEditorRequest?
 
@@ -397,6 +397,15 @@ final class DocumentModel: ObservableObject {
     private var ghost: ImageStampAnnotation?
     /// Anchor for ⇧-click range selection in the page grid.
     var lastClickedPage: ObjectIdentifier?
+    /// Fill-in areas found on each page (see FieldDetector).
+    @Published var detectedFields: [ObjectIdentifier: [DetectedField]] = [:]
+    @Published var hoveredFieldID: UUID?
+    /// Bumped per document so late detection results of an old one are dropped.
+    var detectionGeneration = 0
+    /// Pages still waiting for field detection.
+    var detectionQueue: [PDFPage] = []
+    /// Called when overlays need repainting (fields, hover, tool, stamps).
+    var onFieldsChanged: (() -> Void)?
     /// Identifies the page drag in flight, so only our own drags reorder.
     var pageDragToken: String?
 
@@ -519,6 +528,7 @@ final class DocumentModel: ObservableObject {
         undoManager.removeAllActions()
         refreshUndoState()
         self.mode = mode
+        detectFields()
     }
 
     /// Back to the start screen.
@@ -629,6 +639,7 @@ final class DocumentModel: ObservableObject {
                 hasChanges = false
                 formFieldCount = Self.countFormFields(in: saved)
                 formValuesAtLoad = Self.formValues(in: saved)
+                detectFields()
                 docRevision += 1
                 // The undo stack references the pre-save document; drop it.
                 undoManager.removeAllActions()
@@ -655,6 +666,7 @@ final class DocumentModel: ObservableObject {
 
     func place(at pagePoint: CGPoint, on page: PDFPage) {
         guard let pending = pendingStamp else { return }
+        Log.ui.notice("place: at \(Int(pagePoint.x), privacy: .public),\(Int(pagePoint.y), privacy: .public) page \(self.document?.index(for: page) ?? -1, privacy: .public)")
         let imgSize = pending.image.size
         let aspect = imgSize.width > 0 ? imgSize.height / imgSize.width : 0.4
         let width = pending.defaultWidth
@@ -750,6 +762,7 @@ final class DocumentModel: ObservableObject {
         redraw(stamp.page)
         annotationsByID[stamp.id] = annotation
         stamps.append(stamp)
+        onFieldsChanged?()
         hasChanges = true
         undoManager.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated { model.removeStamp(id: stamp.id) }
@@ -765,6 +778,7 @@ final class DocumentModel: ObservableObject {
         }
         annotationsByID[id] = nil
         stamps.remove(at: idx)
+        onFieldsChanged?()
         if selectedStampID == id { selectedStampID = nil }
         hasChanges = true
         undoManager.registerUndo(withTarget: self) { model in
@@ -887,6 +901,7 @@ final class DocumentModel: ObservableObject {
     }
 
     func cancelPending() {
+        Log.ui.notice("place: cancelled")
         pendingStamp = nil
     }
 
@@ -975,7 +990,11 @@ final class DocumentModel: ObservableObject {
     /// e.g. after the signature popover closed, so the next click lands.
     func focusDocumentSoon() {
         DispatchQueue.main.async { [weak self] in
-            guard let view = self?.pdfView, let window = view.window else { return }
+            guard let view = self?.pdfView, let window = view.window else {
+                Log.ui.notice("focus: no PDF view window")
+                return
+            }
+            Log.ui.notice("focus: window key \(window.isKeyWindow, privacy: .public), app active \(NSApp.isActive, privacy: .public)")
             if !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
             window.makeFirstResponder(view)
         }
@@ -1084,6 +1103,8 @@ final class DocumentModel: ObservableObject {
     }
 
     func changed() {
+        detectFields(reset: false)
+        onFieldsChanged?()
         hasChanges = true
         docRevision += 1
         pdfView?.layoutDocumentView()

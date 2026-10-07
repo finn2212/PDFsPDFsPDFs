@@ -41,7 +41,7 @@
 "error.cantOpen" = "“%@” could not be opened.";
 "error.writeFailed" = "The file could not be written.";
 "error.emptySelection" = "No pages selected.";
-"tool.text" = "Text";
+"tool.text" = "Fill In";
 "menu.checkUpdates" = "Check for Updates…";
 "unsaved.title" = "Unsaved Changes";
 "unsaved.message" = "The current document has unsaved changes. What would you like to do?";
@@ -167,11 +167,7 @@
 "pages.split.help" = "Split the document into several PDFs";
 "pages.split.run" = "Split into %d PDFs…";
 "pages.split.singles" = "Every Page as Its Own PDF…";
-"signature.addInitials" = "Initials";
-"signature.addSignature" = "Add signature";
-"signature.clickToPlace" = "Click, then place it in the document";
 "signature.manage" = "Edit Signatures…";
-"signature.more" = "More";
 "signature.new" = "New Signature…";
 "signature.placeLabel" = "Signature of %@";
 "signature.unnamed" = "My Signature";
@@ -201,8 +197,8 @@
 "tool.date" = "Date";
 "tool.date.help" = "Insert today's date: %@ (⇧⌘D)";
 "tool.sign" = "Sign";
-"tool.sign.help" = "Place a signature or initials (⇧⌘U)";
-"tool.text.help" = "Click anywhere in the document and type (⇧⌘T)";
+"tool.sign.help" = "Hang the signature on the cursor, then click into the page (⇧⌘U)";
+"tool.text.help" = "Click into a detected field or anywhere on the page and type (⇧⌘T)";
 "toolbar.save.help" = "Save changes to the original – signatures are burned in (⌘S)";
 "toolbar.save.helpNew" = "Save the new PDF (⌘S)";
 "toolbar.share" = "Share";
@@ -221,4 +217,9 @@
 "split.done.one" = "%d file saved.";
 "hint.form.one" = "This PDF has %d fillable field – just click into it and type.";
 "convert.pageCount.one" = "%d page will be exported.";
-"hint.idle" = "Choose Sign, Text, Date or Tick – then click into the page.";
+"hint.idle" = "Choose Sign, Fill In, Date or Tick – then click into the page.";
+"tool.sign.more" = "Initials, other signatures, new signature";
+"hint.fields" = "%d empty fields found – click into one and type, Tab jumps to the next.";
+"hint.fields.one" = "%d empty field found – click into it and type.";
+"hint.fieldsIdle" = "%d empty fields to fill in found.";
+"hint.fieldsIdle.one" = "%d empty field to fill in found.";

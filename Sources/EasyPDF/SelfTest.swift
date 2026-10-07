@@ -25,6 +25,7 @@ enum SelfTest {
                 try testInitialsOnRotatedPage()
                 try testShareExport()
                 try testSaveKeepsPageStateAndFormEdits()
+                try testFieldDetection()
             }
             print("SELFTEST PASS")
             exit(0)
@@ -791,5 +792,53 @@ enum SelfTest {
         // Typing into a field happens inside PDFKit; the value comparison must see it.
         model.document?.page(at: 0)?.annotations.first { $0.fieldName == "name" }?.widgetStringValue = "Finn"
         guard model.formChangedSinceLoad else { throw TestError.message("form edit not detected") }
+    }
+
+    /// A form without form fields: lines, a label with space after it, an
+    /// empty box and checkboxes are found; round letters, a rule across the
+    /// page and a table are not.
+    @MainActor
+    private static func testFieldDetection() throws {
+        let url = dir.appendingPathComponent("fields.pdf")
+        var box = CGRect(x: 0, y: 0, width: 595, height: 842)
+        guard let ctx = CGContext(url as CFURL, mediaBox: &box, nil) else { throw TestError.message("fields ctx") }
+        ctx.beginPDFPage(nil)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        let font: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.black]
+        func text(_ s: String, _ x: CGFloat, _ y: CGFloat) { (s as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: font) }
+        func line(_ x0: CGFloat, _ y: CGFloat, _ x1: CGFloat) {
+            ctx.setLineWidth(0.8); ctx.move(to: CGPoint(x: x0, y: y)); ctx.addLine(to: CGPoint(x: x1, y: y)); ctx.strokePath()
+        }
+        ctx.setStrokeColor(NSColor.black.cgColor)
+        line(60, 760, 535)                                       // rule across the page: no field
+        text("Oo0 Ordnung, Datum:", 60, 700)                     // round letters, label with space
+        text("Straße:", 60, 660); line(120, 658, 380)            // line after a label
+        ctx.stroke(CGRect(x: 60, y: 600, width: 11, height: 11)) // checkbox
+        ctx.stroke(CGRect(x: 60, y: 500, width: 300, height: 60)) // empty box
+        for i in 0...2 { line(60, 400 - CGFloat(i) * 20, 300) }  // table grid: no field
+        for x in [60, 180, 300] as [CGFloat] {
+            ctx.move(to: CGPoint(x: x, y: 400)); ctx.addLine(to: CGPoint(x: x, y: 360)); ctx.strokePath()
+        }
+        line(60, 200, 260)                                        // signature line
+        NSGraphicsContext.restoreGraphicsState()
+        ctx.endPDFPage()
+        ctx.closePDF()
+
+        guard let page = PDFDocument(url: url)?.page(at: 0), let input = FieldDetector.input(for: page) else {
+            throw TestError.message("fields input")
+        }
+        let fields = FieldDetector.detect(input)
+        let kinds = fields.map(\.kind)
+        let summary = fields.map { "\($0.kind)@\(Int($0.rect.minX)),\(Int($0.rect.minY))" }.joined(separator: " ")
+        guard kinds.filter({ $0 == .checkbox }).count == 1,
+              kinds.filter({ $0 == .box }).count == 1,
+              kinds.filter({ $0 == .label }).count == 1,
+              kinds.filter({ $0 == .line }).count == 2,
+              !fields.contains(where: { $0.rect.minY > 740 }),             // not the rule
+              !fields.contains(where: { $0.rect.minY > 355 && $0.rect.maxY < 410 }) // not the table
+        else {
+            throw TestError.message("field detection: \(summary)")
+        }
     }
 }

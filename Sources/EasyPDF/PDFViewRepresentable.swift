@@ -10,8 +10,76 @@ final class InlineTextField: NSTextField {
     }
 }
 
+/// Draws the detected fill-in fields of one page in blue (like Acrobat's
+/// Fill & Sign) while the fill-in tool is on. Purely visual: it lets every
+/// click through and never touches the document.
+final class FieldOverlayView: NSView {
+    let page: PDFPage
+    weak var pdfView: PDFView?
+    weak var model: DocumentModel?
+
+    init(page: PDFPage, pdfView: PDFView, model: DocumentModel?) {
+        self.page = page
+        self.pdfView = pdfView
+        self.model = model
+        super.init(frame: .zero)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .duringViewResize
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let model, let pdfView, model.textToolActive else { return }
+        let accent = NSColor.controlAccentColor
+        for field in model.openFields(on: page) {
+            let rect = convert(pdfView.convert(field.rect, from: page), from: pdfView)
+            let hovered = field.id == model.hoveredFieldID
+            accent.withAlphaComponent(hovered ? 0.22 : 0.10).setFill()
+            let shape = NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2)
+            shape.fill()
+            accent.withAlphaComponent(hovered ? 0.9 : 0.45).setStroke()
+            if field.kind == .line {
+                let underline = NSBezierPath()
+                underline.move(to: NSPoint(x: rect.minX, y: rect.minY))
+                underline.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+                underline.lineWidth = hovered ? 2 : 1
+                underline.stroke()
+            } else {
+                shape.lineWidth = hovered ? 1.5 : 1
+                shape.stroke()
+            }
+        }
+    }
+}
+
+/// Hands PDFKit one field overlay per displayed page.
+final class FieldOverlayProvider: NSObject, PDFPageOverlayViewProvider {
+    weak var model: DocumentModel?
+    private var overlays: [ObjectIdentifier: FieldOverlayView] = [:]
+
+    func pdfView(_ view: PDFView, overlayViewFor page: PDFPage) -> NSView? {
+        let overlay = FieldOverlayView(page: page, pdfView: view, model: model)
+        overlays[ObjectIdentifier(page)] = overlay
+        return overlay
+    }
+
+    func pdfView(_ pdfView: PDFView, willEndDisplayingOverlayView overlayView: NSView, for page: PDFPage) {
+        overlays[ObjectIdentifier(page)] = nil
+    }
+
+    func refresh() {
+        overlays.values.forEach { $0.needsDisplay = true }
+    }
+}
+
 final class InteractivePDFView: PDFView, NSTextFieldDelegate {
     weak var model: DocumentModel?
+    let fieldOverlays = FieldOverlayProvider()
+    /// The detected field the inline editor is filling, for Tab navigation.
+    private var editingField: DetectedField?
 
     private enum DragMode {
         case move(offset: CGPoint)
@@ -45,7 +113,9 @@ final class InteractivePDFView: PDFView, NSTextFieldDelegate {
     // While a signature waits to be placed, the first click into an inactive
     // window places it instead of only activating the window.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        model?.pendingStamp != nil || super.acceptsFirstMouse(for: event)
+        let accept = model?.pendingStamp != nil || super.acceptsFirstMouse(for: event)
+        Log.ui.notice("acceptsFirstMouse: \(accept, privacy: .public)")
+        return accept
     }
 
     // Routes Cmd+Z / Cmd+Shift+Z from the Edit menu to our document undo stack.
@@ -102,9 +172,11 @@ final class InteractivePDFView: PDFView, NSTextFieldDelegate {
     override func mouseDown(with event: NSEvent) {
         guard let model, let (point, page) = pagePoint(for: event),
               model.document != nil else {
+            Log.ui.notice("mouseDown: outside any page")
             super.mouseDown(with: event)
             return
         }
+        Log.ui.notice("mouseDown: pending \(model.pendingStamp != nil, privacy: .public) textTool \(model.textToolActive, privacy: .public) clicks \(event.clickCount, privacy: .public)")
 
         // An open editor commits when clicking elsewhere. If a stamp is waiting
         // to be placed, the same click still places it.
@@ -163,9 +235,19 @@ final class InteractivePDFView: PDFView, NSTextFieldDelegate {
             return
         }
 
-        // Text tool: click into the page and start typing right there.
+        // Fill-in tool: a click into a detected field writes right there
+        // (checkboxes get a tick); anywhere else starts free text.
         if model.textToolActive {
             model.select(nil)
+            if let field = model.field(at: point, on: page) {
+                Log.ui.notice("fields: clicked a \(String(describing: field.kind), privacy: .public) field")
+                if field.kind == .checkbox {
+                    model.tick(field, on: page)
+                } else {
+                    beginFieldEditing(field, on: page)
+                }
+                return
+            }
             beginTextEditing(at: point, on: page, existing: nil)
             return
         }
@@ -193,8 +275,16 @@ final class InteractivePDFView: PDFView, NSTextFieldDelegate {
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        guard let model, model.pendingStamp != nil, let (point, page) = pagePoint(for: event) else { return }
-        model.updateGhost(at: point, on: page)
+        guard let model, let (point, page) = pagePoint(for: event) else { return }
+        if model.pendingStamp != nil {
+            model.updateGhost(at: point, on: page)
+        } else if model.textToolActive {
+            let hovered = model.field(at: point, on: page)?.id
+            if hovered != model.hoveredFieldID {
+                model.hoveredFieldID = hovered
+                fieldOverlays.refresh()
+            }
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -302,6 +392,8 @@ final class InteractivePDFView: PDFView, NSTextFieldDelegate {
         editingPage = page
         editingOrigin = origin
         editingReplacesID = existing?.id
+        // A new text starts with nothing selected (Tab leaves the previous one).
+        if existing == nil { model.select(nil) }
         // Continue at the size the text has now (it may have been resized).
         if let existing {
             model.textToolFontSize = (existing.effectiveFontSize * 2).rounded() / 2
@@ -394,6 +486,29 @@ final class InteractivePDFView: PDFView, NSTextFieldDelegate {
                              width: width, height: height)
     }
 
+    /// Starts typing into a detected field, at a size that fits it.
+    func beginFieldEditing(_ field: DetectedField, on page: PDFPage) {
+        guard let model else { return }
+        commitTextEditing()
+        model.textToolFontSize = (field.fontSize * 2).rounded() / 2
+        beginTextEditing(at: field.textOrigin, on: page, existing: nil)
+        editingField = field
+    }
+
+    /// Tab / ⇧Tab in the inline editor: keep the text, jump to the next field.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        let forward = commandSelector == #selector(NSResponder.insertTab(_:))
+        let backward = commandSelector == #selector(NSResponder.insertBacktab(_:))
+        guard forward || backward, let model, let page = editingPage else { return false }
+        let current = editingField
+        commitTextEditing()
+        if let (next, nextPage) = model.neighbourField(of: current, on: page, backwards: backward) {
+            go(to: next.rect.insetBy(dx: -40, dy: -60), on: nextPage)
+            beginFieldEditing(next, on: nextPage)
+        }
+        return true
+    }
+
     @objc private func textFieldAction() {
         commitTextEditing()
     }
@@ -438,6 +553,7 @@ final class InteractivePDFView: PDFView, NSTextFieldDelegate {
     private func teardownEditor() {
         textField?.removeFromSuperview()
         textField = nil
+        editingField = nil
         editingPage = nil
         model?.isEditingText = false
         removeObservers()
@@ -490,6 +606,9 @@ struct PDFKitView: NSViewRepresentable {
     func makeNSView(context: Context) -> InteractivePDFView {
         let view = InteractivePDFView()
         view.model = model
+        view.fieldOverlays.model = model
+        view.pageOverlayViewProvider = view.fieldOverlays
+        model.onFieldsChanged = { [weak view] in view?.fieldOverlays.refresh() }
         view.autoScales = true
         view.displayMode = .singlePageContinuous
         view.backgroundColor = .windowBackgroundColor

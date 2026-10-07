@@ -16,167 +16,101 @@ extension Person {
     }
 }
 
-// MARK: - Picker (popover)
+// MARK: - Actions
 
-/// Quick pick: every saved signature and its initials as large tiles.
+/// Starting a signature: one click places the default signature; the menu
+/// next to the button offers initials, other people and editing.
 @MainActor
-struct SignaturePicker: View {
+enum SignatureActions {
+    private static let lastUsedKey = "lastSignaturePerson"
+
+    /// The signature used last, else the first one that exists.
+    static func defaultPerson(in store: ProfileStore) -> Person? {
+        let last = UserDefaults.standard.string(forKey: lastUsedKey)
+        return store.persons.first { $0.id.uuidString == last && $0.signatureImage != nil }
+            ?? store.persons.first { $0.signatureImage != nil }
+    }
+
+    /// "Sign": place the default signature, or create the first one.
+    static func sign(doc: DocumentModel, store: ProfileStore) {
+        doc.mode = .document
+        if let person = defaultPerson(in: store) {
+            place(person, .signature, doc: doc)
+        } else {
+            Log.ui.notice("sign: no signature yet, opening the editor")
+            doc.signatureEditor = SignatureEditorRequest(person: Person(), kind: .signature)
+        }
+    }
+
+    static func place(_ person: Person, _ kind: AssetKind, doc: DocumentModel) {
+        guard let image = kind == .signature ? person.signatureImage : person.initialsImage else { return }
+        UserDefaults.standard.set(person.id.uuidString, forKey: lastUsedKey)
+        let label = kind == .signature
+            ? loc("signature.placeLabel", person.displayName)
+            : loc("initials.placeLabel", person.displayName)
+        Log.ui.notice("sign: start placing \(kind == .signature ? "signature" : "initials", privacy: .public)")
+        doc.startPlacing(image: image, defaultWidth: kind == .signature ? 170 : 56, label: label)
+    }
+
+    static func placeEverywhere(_ person: Person, doc: DocumentModel) {
+        guard let image = person.initialsImage else { return }
+        doc.placeOnEveryPage(image: image, width: 46)
+    }
+
+    static func edit(_ person: Person, kind: AssetKind, doc: DocumentModel) {
+        doc.signatureEditor = SignatureEditorRequest(person: person, kind: kind,
+                                                     placeAfterSave: person.signaturePNG == nil)
+    }
+}
+
+/// Menu next to "Sign": every signature and initials with a small preview.
+@MainActor
+struct SignatureMenuItems: View {
     @EnvironmentObject var doc: DocumentModel
     @EnvironmentObject var store: ProfileStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(store.persons) { person in
-                        PersonTiles(person: person,
-                                    place: place,
-                                    placeEverywhere: placeEverywhere,
-                                    edit: { edit(person, kind: $0) },
-                                    delete: { store.remove(person) })
+        ForEach(store.persons) { person in
+            Section(person.displayName) {
+                if let image = person.signatureImage {
+                    Button {
+                        SignatureActions.place(person, .signature, doc: doc)
+                    } label: {
+                        Label { Text(loc("person.signature")) } icon: { Image(nsImage: Self.thumbnail(image)) }
                     }
                 }
-                .padding(16)
-            }
-            .frame(maxHeight: 420)
-            .fixedSize(horizontal: false, vertical: true)
-
-            Divider()
-
-            Button {
-                edit(Person(), kind: .signature)
-            } label: {
-                Label(loc("signature.new"), systemImage: "plus")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-        }
-        .frame(width: 380)
-    }
-
-    private func place(_ person: Person, _ kind: AssetKind) {
-        guard let image = kind == .signature ? person.signatureImage : person.initialsImage else { return }
-        doc.showSignaturePicker = false
-        let label = kind == .signature
-            ? loc("signature.placeLabel", person.displayName)
-            : loc("initials.placeLabel", person.displayName)
-        doc.startPlacing(image: image, defaultWidth: kind == .signature ? 170 : 56, label: label)
-    }
-
-    private func placeEverywhere(_ person: Person) {
-        guard let image = person.initialsImage else { return }
-        doc.showSignaturePicker = false
-        doc.placeOnEveryPage(image: image, width: 46)
-    }
-
-    private func edit(_ person: Person, kind: AssetKind) {
-        doc.showSignaturePicker = false
-        // One modal at a time: let the popover close before the sheet opens.
-        DispatchQueue.main.async {
-            doc.signatureEditor = SignatureEditorRequest(person: person, kind: kind,
-                                                         placeAfterSave: person.signaturePNG == nil)
-        }
-    }
-}
-
-@MainActor
-private struct PersonTiles: View {
-    let person: Person
-    let place: (Person, AssetKind) -> Void
-    let placeEverywhere: (Person) -> Void
-    let edit: (AssetKind) -> Void
-    let delete: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(person.displayName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Menu {
-                    Button(loc("person.edit")) { edit(.signature) }
-                    Button(loc("person.delete"), role: .destructive, action: delete)
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help(loc("signature.more"))
-            }
-            HStack(alignment: .top, spacing: 10) {
-                AssetTile(image: person.signatureImage,
-                          caption: loc("person.signature"),
-                          emptyLabel: loc("signature.addSignature"),
-                          width: 220) {
-                    person.signatureImage != nil ? place(person, .signature) : edit(.signature)
-                }
-                .uiTestTarget("tile.signature.\(person.id)")
-                VStack(spacing: 6) {
-                    AssetTile(image: person.initialsImage,
-                              caption: loc("person.initials"),
-                              emptyLabel: loc("signature.addInitials"),
-                              width: 110) {
-                        person.initialsImage != nil ? place(person, .initials) : edit(.initials)
+                if let image = person.initialsImage {
+                    Button {
+                        SignatureActions.place(person, .initials, doc: doc)
+                    } label: {
+                        Label { Text(loc("person.initials")) } icon: { Image(nsImage: Self.thumbnail(image)) }
                     }
-                    if person.initialsImage != nil {
-                        Button(loc("initials.everyPage")) { placeEverywhere(person) }
-                            .buttonStyle(.link)
-                            .font(.caption)
-                            .help(loc("initials.everyPage.help"))
+                    Button(loc("initials.everyPage")) {
+                        SignatureActions.placeEverywhere(person, doc: doc)
                     }
+                    .help(loc("initials.everyPage.help"))
                 }
+                Button(loc("person.edit") + " …") {
+                    SignatureActions.edit(person, kind: .signature, doc: doc)
+                }
+                Button(loc("person.delete"), role: .destructive) { store.remove(person) }
             }
+        }
+        Divider()
+        Button(loc("signature.new")) {
+            SignatureActions.edit(Person(), kind: .signature, doc: doc)
         }
     }
-}
 
-@MainActor
-private struct AssetTile: View {
-    let image: NSImage?
-    let caption: String
-    let emptyLabel: String
-    let width: CGFloat
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.white)
-                    if let image {
-                        Image(nsImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .padding(10)
-                    } else {
-                        Label(emptyLabel, systemImage: "plus")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(width: width, height: 76)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(hovering ? Color.accentColor : Color.primary.opacity(0.12),
-                                      style: StrokeStyle(lineWidth: hovering ? 2 : 1,
-                                                         dash: image == nil ? [5, 4] : []))
-                )
-                Text(caption)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(image == nil ? emptyLabel : loc("signature.clickToPlace"))
+    /// Menu items show images at their own size: scale to text height.
+    static func thumbnail(_ image: NSImage) -> NSImage {
+        let height: CGFloat = 18
+        let width = min(72, image.size.height > 0 ? image.size.width * height / image.size.height : height)
+        let result = NSImage(size: NSSize(width: width, height: height))
+        result.lockFocus()
+        image.draw(in: NSRect(x: 0, y: 0, width: width, height: height))
+        result.unlockFocus()
+        return result
     }
 }
 

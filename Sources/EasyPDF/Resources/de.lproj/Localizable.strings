@@ -41,7 +41,7 @@
 "error.cantOpen" = "„%@“ konnte nicht geöffnet werden.";
 "error.writeFailed" = "Die Datei konnte nicht geschrieben werden.";
 "error.emptySelection" = "Keine Seiten ausgewählt.";
-"tool.text" = "Text";
+"tool.text" = "Ausfüllen";
 "menu.checkUpdates" = "Nach Updates suchen…";
 "unsaved.title" = "Ungespeicherte Änderungen";
 "unsaved.message" = "Das aktuelle Dokument enthält ungespeicherte Änderungen. Was möchtest du tun?";
@@ -167,11 +167,7 @@
 "pages.split.help" = "Dokument in mehrere PDFs aufteilen";
 "pages.split.run" = "In %d PDFs trennen …";
 "pages.split.singles" = "Jede Seite als eigenes PDF …";
-"signature.addInitials" = "Initialen";
-"signature.addSignature" = "Unterschrift anlegen";
-"signature.clickToPlace" = "Klicken und dann im Dokument platzieren";
 "signature.manage" = "Unterschriften bearbeiten …";
-"signature.more" = "Mehr";
 "signature.new" = "Neue Unterschrift …";
 "signature.placeLabel" = "Unterschrift von %@";
 "signature.unnamed" = "Meine Unterschrift";
@@ -201,8 +197,8 @@
 "tool.date" = "Datum";
 "tool.date.help" = "Heutiges Datum einfügen: %@ (⇧⌘D)";
 "tool.sign" = "Unterschreiben";
-"tool.sign.help" = "Unterschrift oder Initialen platzieren (⇧⌘U)";
-"tool.text.help" = "Irgendwo ins Dokument klicken und tippen (⇧⌘T)";
+"tool.sign.help" = "Unterschrift an den Mauszeiger hängen, dann in die Seite klicken (⇧⌘U)";
+"tool.text.help" = "In ein erkanntes Feld oder irgendwo in die Seite klicken und tippen (⇧⌘T)";
 "toolbar.save.help" = "Änderungen ins Original speichern – Unterschriften werden fest eingebrannt (⌘S)";
 "toolbar.save.helpNew" = "Neues PDF speichern (⌘S)";
 "toolbar.share" = "Teilen";
@@ -221,4 +217,9 @@
 "split.done.one" = "%d Datei gesichert.";
 "hint.form.one" = "Dieses PDF hat %d ausfüllbares Feld – einfach hineinklicken und tippen.";
 "convert.pageCount.one" = "%d Seite wird exportiert.";
-"hint.idle" = "Unterschreiben, Text, Datum oder Ankreuzen wählen – dann in die Seite klicken.";
+"hint.idle" = "Unterschreiben, Ausfüllen, Datum oder Ankreuzen wählen – dann in die Seite klicken.";
+"tool.sign.more" = "Initialen, andere Unterschriften, neue Unterschrift";
+"hint.fields" = "%d freie Felder erkannt – hineinklicken und tippen, Tab springt zum nächsten.";
+"hint.fields.one" = "%d freies Feld erkannt – hineinklicken und tippen.";
+"hint.fieldsIdle" = "%d freie Felder zum Ausfüllen erkannt.";
+"hint.fieldsIdle.one" = "%d freies Feld zum Ausfüllen erkannt.";

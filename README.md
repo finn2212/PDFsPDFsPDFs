@@ -16,9 +16,9 @@ Oben in der Leiste wechselst du zwischen **Dokument** (unterschreiben und ausfü
 
 ### Dokument: unterschreiben und ausfüllen
 
-- ✍️ **Unterschreiben** – gespeicherte Unterschriften und Initialen als große Kacheln; anklicken, die Unterschrift hängt halbtransparent am Mauszeiger, Klick setzt sie. **Initialen auf jeder Seite** mit einem Klick.
+- ✍️ **Unterschreiben** – ein Klick, und die Unterschrift hängt halbtransparent am Mauszeiger; der nächste Klick setzt sie. Der Pfeil daneben bietet Initialen, **Initialen auf jeder Seite**, weitere Personen und „Neue Unterschrift“.
 - Neue Unterschrift: **Zeichnen**, **Tippen** (in einer Schreibschrift) oder **Bild** (Weiß wird entfernt) – in einem einzigen Fenster, Name optional. Gespeichert nur lokal (`~/Library/Application Support/PDFsPDFsPDFs/`).
-- 🔤 **Text** – Werkzeug an, irgendwo hinklicken, lostippen; Schriftgröße unten in der Leiste. Doppelklick öffnet einen Text wieder.
+- 🔤 **Ausfüllen** – erkennt freie Stellen wie im Acrobat Reader, auch in Scans: Schreiblinien und „______“, leere Kästen, Ankreuzkästchen und „Name:“ mit Platz dahinter werden blau markiert. Hineinklicken und tippen, der Text sitzt auf der Linie; Tab springt zum nächsten Feld, ein Klick ins Kästchen setzt ✓. Außerhalb der Felder: irgendwo hinklicken und lostippen. Doppelklick öffnet einen Text wieder.
 - 📅 **Datum** und ✓ **Ankreuzen** (✓ / ✗ / ●) für Formulare ohne Felder.
 - Ausfüllbare Formulare (AcroForms) werden beim Öffnen erkannt und angekündigt – einfach in die Felder klicken.
 - Ausgewähltes Element: Größe, Drehen und Löschen in der Leiste unter den Werkzeugen (sie liegt nie über der Seite); Ecken ziehen, blauer Griff dreht, rotes × löscht. Rückgängig/Wiederholen (⌘Z / ⇧⌘Z) für alles.
@@ -43,7 +43,7 @@ Oben in der Leiste wechselst du zwischen **Dokument** (unterschreiben und ausfü
 
 - PDF öffnen per Finder-Doppelklick („Öffnen mit“), Dock-Drop, Drag & Drop, „Zuletzt geöffnet“.
 - **⌘S** überschreibt das Original – Unterschriften werden **fest eingebrannt** (geflattet). **⇧⌘S** = Speichern unter, **Kopie sichern…** lässt das Original unangetastet. Reine Seiten-Operationen werden verlustfrei gespeichert (Text/Links/Formulare bleiben erhalten).
-- Werkzeuge per Tastatur: ⇧⌘U Unterschreiben, ⇧⌘T Text, ⇧⌘D Datum, ⇧⌘K Häkchen.
+- Werkzeuge per Tastatur: ⇧⌘U Unterschreiben, ⇧⌘T Ausfüllen, ⇧⌘D Datum, ⇧⌘K Häkchen.
 - Drucken (⌘P), Zoom (⌘ +/−/0), Deutsch + Englisch, hell und dunkel.
 
 ## Installation
@@ -115,7 +115,8 @@ Der Snapshot-Modus rendert Startbildschirm, Dokument- und Seiten-Ansicht, Unters
 - `Sources/EasyPDF/StartView.swift` – Startbildschirm mit Drop-Zone und „Zuletzt geöffnet“
 - `Sources/EasyPDF/DocumentWorkspace.swift` – Ansicht „Dokument“: Werkzeugleiste, Seitenleiste, Kontextleiste
 - `Sources/EasyPDF/PagesView.swift` – Ansicht „Seiten“: Raster, Auswahl, Drag & Drop, Schnitte
-- `Sources/EasyPDF/Signatures.swift` – Unterschriften-Auswahl (Popover) und -Editor (Zeichnen/Tippen/Bild)
+- `Sources/EasyPDF/Signatures.swift` – Unterschreiben (Ein-Klick + Menü) und Unterschriften-Editor (Zeichnen/Tippen/Bild)
+- `Sources/EasyPDF/FieldDetection.swift`, `DocumentModel+Fields.swift` – Erkennung freier Felder (Linien, Kästen, Kästchen, „Label:“) und Ausfüllen per Klick/Tab
 - `Sources/EasyPDF/Components.swift` – gemeinsame Bausteine (Werkzeug-Buttons, Kontextleiste, Drop-Hervorhebung)
 - `Sources/EasyPDF/DocumentModel.swift` – Dokumentzustand, Stempel, Undo, Flattening, Platzier-Vorschau
 - `Sources/EasyPDF/DocumentModel+Pages.swift` – Seiten-Operationen auf Auswahlen (verschieben, löschen, drehen, einfügen, trennen)
