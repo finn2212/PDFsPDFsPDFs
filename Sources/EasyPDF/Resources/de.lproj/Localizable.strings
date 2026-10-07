@@ -221,3 +221,4 @@
 "split.done.one" = "%d Datei gesichert.";
 "hint.form.one" = "Dieses PDF hat %d ausfüllbares Feld – einfach hineinklicken und tippen.";
 "convert.pageCount.one" = "%d Seite wird exportiert.";
+"hint.idle" = "Unterschreiben, Text, Datum oder Ankreuzen wählen – dann in die Seite klicken.";

@@ -11,6 +11,7 @@ struct DocumentWorkspace: View {
     var body: some View {
         VStack(spacing: 0) {
             DocumentToolStrip(showsPageStrip: $showsPageStrip)
+            DocumentContextRow()
             HStack(spacing: 0) {
                 if showsPageStrip && doc.pageCount > 1 {
                     PageStrip()
@@ -61,6 +62,7 @@ private struct DocumentToolStrip: View {
                 Label(loc("tool.sign"), systemImage: "signature")
             }
             .buttonStyle(ToolButtonStyle(isOn: doc.pendingStamp != nil && doc.pendingStamp?.text == nil))
+            .uiTestTarget("tool.sign")
             .popover(isPresented: $doc.showSignaturePicker, arrowEdge: .bottom) {
                 SignaturePicker()
                     .environmentObject(doc)
@@ -108,107 +110,97 @@ private struct DocumentToolStrip: View {
                 .help(loc("tool.check.more"))
             }
         } trailing: { _ in
+            EmptyView()
+        }
+    }
+}
+
+// MARK: - Context row
+
+/// What is going on right now, and the controls for it.
+struct DocumentContextRow: View {
+    @EnvironmentObject var doc: DocumentModel
+
+    var body: some View {
+        ContextRow {
+            state
+        } trailing: {
             BarIconButton(systemImage: "minus.magnifyingglass", help: loc("menu.zoomOut")) {
                 doc.pdfView?.zoomOut(nil)
             }
             BarIconButton(systemImage: "plus.magnifyingglass", help: loc("menu.zoomIn")) {
                 doc.pdfView?.zoomIn(nil)
             }
-            Button {
+            BarIconButton(systemImage: "arrow.up.left.and.down.right.magnifyingglass", help: loc("menu.zoomFit")) {
                 doc.pdfView?.autoScales = true
-            } label: {
-                Label(loc("menu.zoomFit"), systemImage: "arrow.up.left.and.down.right.magnifyingglass")
             }
-            .buttonStyle(ToolButtonStyle())
-            .help(loc("menu.zoomFit"))
         }
     }
-}
 
-// MARK: - Context bar
-
-/// Hosted on top of the PDF view by `PDFCanvasView`, not as a SwiftUI overlay.
-struct DocumentContextBar: View {
-    @EnvironmentObject var doc: DocumentModel
-
-    var body: some View {
-        Group {
-            if doc.isEditingText {
-                ContextBar(floating: false) {
-                    Image(systemName: "keyboard").foregroundStyle(.secondary)
-                    Text(loc("hint.typing"))
-                    Divider().frame(height: 18)
-                    textSize
-                }
-            } else if let pending = doc.pendingStamp {
-                ContextBar(floating: false) {
-                    Image(systemName: "hand.point.up.left").foregroundStyle(Color.accentColor)
-                    Text(loc("hint.placement", pending.label))
-                    Button(loc("action.cancel")) { doc.cancelPending() }
-                        .keyboardShortcut(.cancelAction)
-                }
-            } else if let stamp = doc.selectedStamp {
-                ContextBar(floating: false) {
-                    if stamp.text != nil {
-                        let size = stamp.effectiveFontSize.rounded()
-                        SizeStepper(label: loc("text.size"),
-                                    value: "\(Int(size)) pt",
-                                    decrease: { doc.setSelectedTextSize(size - 2) },
-                                    increase: { doc.setSelectedTextSize(size + 2) })
-                    } else {
-                        SizeStepper(label: loc("toolbar.size"),
-                                    value: "\(Int(stamp.rect.width.rounded())) pt",
-                                    decrease: { doc.scaleSelected(by: 1 / 1.12) },
-                                    increase: { doc.scaleSelected(by: 1.12) })
-                    }
-                    Divider().frame(height: 18)
-                    BarIconButton(systemImage: "rotate.left", help: loc("toolbar.rotateStampLeft")) {
-                        doc.rotateSelected(by: 15)
-                    }
-                    BarIconButton(systemImage: "rotate.right", help: loc("toolbar.rotateStampRight")) {
-                        doc.rotateSelected(by: -15)
-                    }
-                    Divider().frame(height: 18)
-                    BarIconButton(systemImage: "trash", help: loc("toolbar.deleteStamp"), role: .destructive) {
-                        doc.removeSelected()
-                    }
-                    if stamp.text != nil {
-                        Text(loc("hint.editText"))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } else if doc.textToolActive {
-                ContextBar(floating: false) {
-                    Image(systemName: "character.cursor.ibeam").foregroundStyle(Color.accentColor)
-                    Text(loc("hint.textTool"))
-                    Divider().frame(height: 18)
-                    textSize
-                    Button(loc("action.done")) { doc.textToolActive = false }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                }
-            } else if let status = doc.statusMessage {
-                ContextBar(floating: false) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    Text(status)
-                }
+    @ViewBuilder
+    private var state: some View {
+        if doc.isEditingText {
+            Image(systemName: "keyboard").foregroundStyle(.secondary)
+            Text(loc("hint.typing"))
+            RowDivider()
+            textSize
+        } else if let pending = doc.pendingStamp {
+            Image(systemName: "hand.point.up.left").foregroundStyle(Color.accentColor)
+            Text(loc("hint.placement", pending.label))
+            Button(loc("action.cancel")) { doc.cancelPending() }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+        } else if let stamp = doc.selectedStamp {
+            if stamp.text != nil {
+                let size = stamp.effectiveFontSize.rounded()
+                SizeStepper(label: loc("text.size"),
+                            value: "\(Int(size)) pt",
+                            decrease: { doc.setSelectedTextSize(size - 2) },
+                            increase: { doc.setSelectedTextSize(size + 2) })
+            } else {
+                SizeStepper(label: loc("toolbar.size"),
+                            value: "\(Int(stamp.rect.width.rounded())) pt",
+                            decrease: { doc.scaleSelected(by: 1 / 1.12) },
+                            increase: { doc.scaleSelected(by: 1.12) })
+            }
+            RowDivider()
+            BarIconButton(systemImage: "rotate.left", help: loc("toolbar.rotateStampLeft")) {
+                doc.rotateSelected(by: 15)
+            }
+            BarIconButton(systemImage: "rotate.right", help: loc("toolbar.rotateStampRight")) {
+                doc.rotateSelected(by: -15)
+            }
+            RowDivider()
+            BarIconButton(systemImage: "trash", help: loc("toolbar.deleteStamp"), role: .destructive) {
+                doc.removeSelected()
+            }
+            if stamp.text != nil {
+                Text(loc("hint.editText")).foregroundStyle(.secondary)
+            }
+        } else if doc.textToolActive {
+            Image(systemName: "character.cursor.ibeam").foregroundStyle(Color.accentColor)
+            Text(loc("hint.textTool"))
+            RowDivider()
+            textSize
+            Button(loc("action.done")) { doc.textToolActive = false }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        } else if let status = doc.statusMessage {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Text(status)
                 .task(id: status) {
                     try? await Task.sleep(nanoseconds: 3_500_000_000)
                     if doc.statusMessage == status { doc.statusMessage = nil }
                 }
-            } else if doc.formFieldCount > 0 && !doc.formHintDismissed {
-                ContextBar(floating: false) {
-                    Image(systemName: "rectangle.and.pencil.and.ellipsis").foregroundStyle(Color.accentColor)
-                    Text(locCount("hint.form", doc.formFieldCount))
-                    BarIconButton(systemImage: "xmark", help: loc("action.dismiss")) {
-                        doc.formHintDismissed = true
-                    }
-                }
+        } else if doc.formFieldCount > 0 && !doc.formHintDismissed {
+            Image(systemName: "rectangle.and.pencil.and.ellipsis").foregroundStyle(Color.accentColor)
+            Text(locCount("hint.form", doc.formFieldCount))
+            BarIconButton(systemImage: "xmark", help: loc("action.dismiss")) {
+                doc.formHintDismissed = true
             }
+        } else {
+            Text(loc("hint.idle")).foregroundStyle(.secondary)
         }
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-        .animation(.easeOut(duration: 0.18), value: doc.isEditingText)
-        .animation(.easeOut(duration: 0.18), value: doc.selectedStampID)
     }
 
     private var textSize: some View {

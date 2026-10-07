@@ -113,6 +113,7 @@ private struct PersonTiles: View {
                           width: 220) {
                     person.signatureImage != nil ? place(person, .signature) : edit(.signature)
                 }
+                .uiTestTarget("tile.signature.\(person.id)")
                 VStack(spacing: 6) {
                     AssetTile(image: person.initialsImage,
                               caption: loc("person.initials"),

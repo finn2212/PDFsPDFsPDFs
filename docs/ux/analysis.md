@@ -66,7 +66,7 @@ Page work has three homes (Pages, Split, Merge), and the rail mixes document too
 | F10 | P2 | No tick or cross for scanned forms without fields. | "✓" tool (✓ / ✗). |
 | F11 | P2 | Placing shows only a crosshair; the size is visible only after the click. | Semi-transparent preview follows the cursor. |
 | F12 | P2 | Fillable forms are not announced. | Hint "This PDF has N form fields" when opening. |
-| F13 | P2 | Long help banner instead of controls ("corners = resize · blue grip = rotate …"). | Floating context bar with real controls (size, rotate, delete). |
+| F13 | P2 | Long help banner instead of controls ("corners = resize · blue grip = rotate …"). | Context row under the tool strip with real controls (size, rotate, delete). |
 | F14 | P2 | Merge list shows file names only and sorts via ↑↓. | Merge result opens in the page grid: thumbnails, drag to sort. |
 | F15 | P2 | Start screen offers only "Open PDF"; merging and images → PDF are hidden in panels. | Start screen with the three starting jobs plus a drop zone. |
 | F16 | P2 | Contracts often need initials on every page; only manual, page by page. | "Initials on every page" in the signature menu. |
@@ -118,7 +118,7 @@ flowchart LR
 
 1. **Model:** page operations on sets of pages with undo (delete, rotate, move, insert, split at cut marks), untitled documents, exclusive tools, ghost preview, export for sharing.
 2. **Shell:** start screen with drop zone, window toolbar with view switch, Save and Share, menus (⌘1/⌘2, undo/redo, export).
-3. **Document view:** tool buttons, signature popover, floating context bar, form hint, ✓/✗, initials on every page, thumbnail strip for navigation.
+3. **Document view:** tool buttons, signature popover, context row, form hint, ✓/✗, initials on every page, thumbnail strip for navigation.
 4. **Pages view:** grid with selection, drag to reorder, file drops, cut marks, actions.
 5. **Signature editor:** one sheet, draw / type / image, name optional.
 6. **Converter as sheets:** images → PDF (start screen, drop) and PDF → images (File › Export).
@@ -133,3 +133,7 @@ All seven packages are built. Verification so far:
 - Found and fixed on the way: custom stamps ignored page rotation and crop box when drawn (PDFKit passes custom annotations an untransformed context), so signatures on rotated scans landed in the wrong place or outside the page after saving — a v1.1 bug. Newly placed stamps were also not always repainted until the next mouse move.
 
 Open for a real-user check: drag-to-reorder and file drops in the page grid, the share menu (Mail/AirDrop), the inline text editor on rotated pages.
+
+### Follow-up after the first real-user test (2026-10-07)
+
+Finn could not place a signature in the installed build. The floating context bar sat on top of the page's bottom edge — exactly where signature lines are after scrolling down — and swallowed the click; after the signature popover closed, the document window could also miss key focus, turning the first click into a mere "activate window" click. Changes: the context controls moved into a fixed row under the tool strip (nothing covers the page any more), placing gives the document focus back and accepts the first click. `--uitest` now drives the real path (Sign button → popover → tile → click) and pixel-checks placement in the middle and at the bottom edge of the visible page, also on a PDF with an offset crop box (35 checks).

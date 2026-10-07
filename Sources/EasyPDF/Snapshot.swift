@@ -91,17 +91,20 @@ enum Snapshot {
     /// Captures one of our own windows (no screen-recording permission needed).
     /// The API is unavailable in the current SDK, hence the dynamic lookup.
     static func capture(window: NSWindow, to url: URL) {
-        guard let handle = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_NOW),
-              let symbol = dlsym(handle, "CGWindowListCreateImage") else { return }
-        let create = unsafeBitCast(symbol, to: CreateImage.self)
-        // optionIncludingWindow = 1 << 3; boundsIgnoreFraming = 1, bestResolution = 1 << 3
-        guard let image = create(.null, 1 << 3, UInt32(window.windowNumber), 1 | 1 << 3)?
-            .takeRetainedValue() else {
+        guard let image = image(of: window) else {
             print("capture failed for \(url.lastPathComponent)")
             return
         }
         try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: url)
         print("wrote \(url.lastPathComponent)")
+    }
+
+    static func image(of window: NSWindow) -> CGImage? {
+        guard let handle = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_NOW),
+              let symbol = dlsym(handle, "CGWindowListCreateImage") else { return nil }
+        let create = unsafeBitCast(symbol, to: CreateImage.self)
+        // optionIncludingWindow = 1 << 3; boundsIgnoreFraming = 1, bestResolution = 1 << 3
+        return create(.null, 1 << 3, UInt32(window.windowNumber), 1 | 1 << 3)?.takeRetainedValue()
     }
 
     /// Popovers and sheets are separate windows; render their SwiftUI content alone.

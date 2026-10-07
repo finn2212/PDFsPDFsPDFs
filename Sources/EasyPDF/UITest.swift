@@ -31,8 +31,11 @@ enum UITest {
         window = Snapshot.makeWindow(store: store, doc: doc, size: CGSize(width: 1240, height: 800))
         Snapshot.settle(0.8)
 
-        textScenario(doc)
-        signatureScenario(doc, store: store)
+        if ProcessInfo.processInfo.environment["UITEST_ACCURACY"] == nil {
+            textScenario(doc)
+            signatureScenario(doc, store: store)
+        }
+        accuracyScenario(doc)
 
         print(failures == 0 ? "UITEST PASS" : "UITEST FAIL (\(failures))")
         doc.hasChanges = false
@@ -91,18 +94,6 @@ enum UITest {
         check(doc.selectedStamp?.text == "Max Mustermann" && !doc.isEditingText,
               "3 · Klick auf den Text wählt ihn aus (kein neues Eingabefeld)")
         shot("3-ausgewaehlt")
-
-        // A click on the bar itself (not on a button) must not reach the page.
-        // Wait for the bar's slide-in to finish, as a person would.
-        Snapshot.settle(0.4)
-        if let bar = findView(typeContaining: "DocumentContextBar", in: window.contentView?.superview) {
-            let edge = bar.convert(NSPoint(x: bar.bounds.maxX - 8, y: bar.bounds.midY), to: nil)
-            mouse(.leftMouseDown, at: edge)
-            mouse(.leftMouseUp, at: edge)
-            Snapshot.settle(0.2)
-            check(!doc.isEditingText && doc.selectedStamp?.text == "Max Mustermann",
-                  "3 · Klick auf die Leiste selbst landet nicht auf der Seite darunter")
-        }
 
         // 4. Change it again: drag the corner bigger, then − twice.
         guard let selected = doc.selectedStamp else { return }
@@ -192,8 +183,27 @@ enum UITest {
         guard let image = store.persons.first?.signatureImage else { return }
         let before = doc.stamps.count
 
-        // The tile in the signature popover calls exactly this.
-        doc.startPlacing(image: image, defaultWidth: 170, label: loc("signature.placeLabel", "Finn Stolle"))
+        // The real path: "Sign" button → popover → signature tile.
+        press("tool.sign")
+        Snapshot.settle(0.6)
+        let popover = NSApp.windows.first { $0 !== window && $0.isVisible && String(describing: Swift.type(of: $0)).contains("Popover") }
+        check(doc.showSignaturePicker && popover != nil, "U · „Unterschreiben“ öffnet die Auswahl")
+        if let popover, let id = store.persons.first?.id,
+           let frame = UITestTargets.frames["tile.signature.\(id)"],
+           let host = findView(typeContaining: "HostingView", in: popover.contentView?.superview) {
+            Snapshot.capture(window: popover, to: outDir.appendingPathComponent("uitest-popover.png"))
+            let point = host.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
+            mouse(.leftMouseDown, at: point, in: popover)
+            mouse(.leftMouseUp, at: point, in: popover)
+            Snapshot.settle(0.6)
+        } else {
+            print("   (Popover oder Kachel nicht gefunden: popover \(popover != nil))")
+        }
+        check(doc.pendingStamp != nil && !doc.showSignaturePicker,
+              "U · Klick auf die Kachel schließt die Auswahl und startet das Platzieren")
+        if doc.pendingStamp == nil {
+            doc.startPlacing(image: image, defaultWidth: 170, label: loc("signature.placeLabel", "Finn Stolle"))
+        }
         for x in stride(from: 300, through: 175, by: -25) {
             move(page: page, to: CGPoint(x: CGFloat(x), y: 140), in: pdfView)
         }
@@ -229,6 +239,49 @@ enum UITest {
         Snapshot.settle(0.3)
     }
 
+    /// Places a solid red block by clicking and checks, on the captured
+    /// window pixels, that it shows up exactly where the click was.
+    private static func accuracyScenario(_ doc: DocumentModel) {
+        guard let page = doc.document?.page(at: 0), let pdfView = doc.pdfView else { return }
+        let crop = page.bounds(for: .cropBox)
+        pdfView.go(to: CGRect(x: crop.minX, y: crop.minY + 150, width: crop.width, height: 300), on: page)
+        Snapshot.settle(0.5)
+        let red = NSImage(size: NSSize(width: 240, height: 90), flipped: false) { rect in
+            NSColor.systemRed.setFill()
+            rect.fill()
+            return true
+        }
+        // Middle of the page, and right at the bottom of the visible area —
+        // where signature lines end up after scrolling down.
+        let bottomInView = NSPoint(x: pdfView.bounds.midX, y: pdfView.bounds.minY + 24)
+        let bottom = pdfView.convert(bottomInView, to: page)
+        for (name, target) in [("Mitte", CGPoint(x: crop.minX + 200, y: crop.minY + 300)),
+                               ("unterer Rand", CGPoint(x: crop.minX + 200, y: bottom.y))] {
+            doc.startPlacing(image: red, defaultWidth: 80, label: "Test")
+            Snapshot.settle(0.2)
+            move(page: page, to: target, in: pdfView)
+            click(page: page, at: target, in: pdfView)
+            doc.select(nil)
+            window.displayIfNeeded()
+            Snapshot.settle(0.5)
+            shot("A-genauigkeit-\(name == "Mitte" ? "mitte" : "unten")")
+            guard let image = Snapshot.image(of: window) else { return }
+            let scale = CGFloat(image.width) / window.frame.width
+            func isRed(at pagePoint: CGPoint) -> Bool {
+                let p = windowPoint(page: page, at: pagePoint, in: pdfView)
+                let x = Int(p.x * scale), y = Int((window.frame.height - p.y) * scale)
+                guard let color = image.cropping(to: CGRect(x: x, y: y, width: 1, height: 1))
+                    .flatMap({ NSBitmapImageRep(cgImage: $0).colorAt(x: 0, y: 0)?.usingColorSpace(.deviceRGB) }) else { return false }
+                return color.redComponent > 0.75 && color.greenComponent < 0.45 && color.blueComponent < 0.45
+            }
+            check(doc.pendingStamp == nil && isRed(at: target),
+                  "A · Klick (\(name)) setzt den Block genau an der Klickstelle")
+            check(!isRed(at: CGPoint(x: target.x + 60, y: target.y)),
+                  "A · und nicht daneben (\(name))")
+        }
+        print("   crop box origin \(crop.origin)")
+    }
+
     private static func move(page: PDFPage, to pagePoint: CGPoint, in view: PDFView) {
         let point = windowPoint(page: page, at: pagePoint, in: view)
         guard let event = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [],
@@ -253,7 +306,9 @@ enum UITest {
     /// never activated (that would take focus away from the user), and
     /// NSWindow.sendEvent swallows clicks into inactive apps as "activate
     /// window" clicks — so dispatch the way an active window would.
-    private static func mouse(_ type: NSEvent.EventType, at point: NSPoint, clickCount: Int = 1) {
+    private static func mouse(_ type: NSEvent.EventType, at point: NSPoint, clickCount: Int = 1,
+                              in target: NSWindow? = nil) {
+        let window: NSWindow = target ?? Self.window
         guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
                                              timestamp: ProcessInfo.processInfo.systemUptime,
                                              windowNumber: window.windowNumber, context: nil,
@@ -324,26 +379,10 @@ enum UITest {
         Snapshot.settle(0.15)
     }
 
-    /// Clicks a control tagged with `.uiTestTarget(id)`. Bar buttons are
-    /// measured inside the bar's own hosting view, so their position stays
-    /// right when the bar re-centres.
+    /// Clicks a control tagged with `.uiTestTarget(id)` at its live position.
     private static func press(_ id: String) {
         let point: NSPoint
-        if id.hasPrefix("size."),
-           let bar = findView(typeContaining: "DocumentContextBar", in: window.contentView?.superview) {
-            // In every variant of the bar, − and + are its first two AppKit
-            // buttons from the left; take their live frames.
-            let buttons = appKitButtons(in: bar).sorted {
-                $0.convert($0.bounds, to: bar).minX < $1.convert($1.bounds, to: bar).minX
-            }
-            let index = id == "size.smaller" ? 0 : 1
-            guard buttons.count > index else {
-                check(false, "Knopf „\(id)“ ist sichtbar")
-                return
-            }
-            let button = buttons[index]
-            point = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
-        } else if let frame = UITestTargets.frames[id], let hosting = window.contentView {
+        if let frame = UITestTargets.frames[id], let hosting = window.contentView {
             // SwiftUI's global space is the hosting view's (flipped) space.
             point = hosting.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
         } else {

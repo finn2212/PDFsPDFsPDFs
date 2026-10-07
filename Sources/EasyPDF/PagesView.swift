@@ -10,10 +10,8 @@ struct PagesView: View {
     var body: some View {
         VStack(spacing: 0) {
             PagesToolStrip()
-            ZStack(alignment: .bottom) {
-                PageGrid()
-                PagesContextBar()
-            }
+            PagesContextRow()
+            PageGrid()
         }
     }
 }
@@ -135,7 +133,7 @@ private struct PageGrid: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 28)
-            .padding(.bottom, 96)
+            .padding(.bottom, 28)
             .frame(maxWidth: .infinity)
             // Clicks between the pages clear the selection; clicks on a page
             // never reach this layer.
@@ -359,39 +357,33 @@ private struct PageDropDelegate: DropDelegate {
 
 // MARK: - Context bar
 
-private struct PagesContextBar: View {
+private struct PagesContextRow: View {
     @EnvironmentObject var doc: DocumentModel
 
     var body: some View {
-        Group {
+        ContextRow {
             if let status = doc.statusMessage {
-                ContextBar {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    Text(status)
-                }
-                .task(id: status) {
-                    try? await Task.sleep(nanoseconds: 3_500_000_000)
-                    if doc.statusMessage == status { doc.statusMessage = nil }
-                }
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text(status)
+                    .task(id: status) {
+                        try? await Task.sleep(nanoseconds: 3_500_000_000)
+                        if doc.statusMessage == status { doc.statusMessage = nil }
+                    }
             } else if doc.parts.count > 1 {
-                ContextBar {
-                    Image(systemName: "scissors").foregroundStyle(.red)
-                    Text(loc("pages.cutSummary", doc.parts.count))
-                    Button(loc("pages.split.run", doc.parts.count)) { doc.splitAtCutMarksWithPanel() }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                    Button(loc("pages.split.clearCuts")) { doc.cutMarks = [] }
-                        .controlSize(.small)
-                }
-            } else if doc.selectedPages.isEmpty {
-                ContextBar {
-                    Image(systemName: "hand.tap").foregroundStyle(.secondary)
-                    Text(loc("pages.hint"))
-                        .foregroundStyle(.secondary)
-                }
+                Image(systemName: "scissors").foregroundStyle(.red)
+                Text(loc("pages.cutSummary", doc.parts.count))
+                Button(loc("pages.split.run", doc.parts.count)) { doc.splitAtCutMarksWithPanel() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                Button(loc("pages.split.clearCuts")) { doc.cutMarks = [] }
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "hand.tap").foregroundStyle(.secondary)
+                Text(loc("pages.hint")).foregroundStyle(.secondary)
             }
+        } trailing: {
+            EmptyView()
         }
-        .animation(.easeOut(duration: 0.18), value: doc.parts.count)
     }
 }
 

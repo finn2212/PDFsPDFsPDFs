@@ -953,6 +953,7 @@ final class DocumentModel: ObservableObject {
                                     label: trimmed,
                                     text: trimmed,
                                     fontSize: fontSize)
+        focusDocumentSoon()
     }
 
     func startPlacingToday(fontSize: CGFloat = 14) {
@@ -967,6 +968,17 @@ final class DocumentModel: ObservableObject {
     /// Starts placing a signature or initials image.
     func startPlacing(image: NSImage, defaultWidth: CGFloat, label: String) {
         pendingStamp = PendingStamp(image: image, defaultWidth: defaultWidth, label: label)
+        focusDocumentSoon()
+    }
+
+    /// Makes the document window key with the PDF view as first responder,
+    /// e.g. after the signature popover closed, so the next click lands.
+    func focusDocumentSoon() {
+        DispatchQueue.main.async { [weak self] in
+            guard let view = self?.pdfView, let window = view.window else { return }
+            if !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
+            window.makeFirstResponder(view)
+        }
     }
 
     /// Places `image` in the lower right corner of every page (initials on

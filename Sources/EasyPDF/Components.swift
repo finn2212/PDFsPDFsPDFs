@@ -85,38 +85,41 @@ struct StripDivider: View {
     }
 }
 
-/// Floating capsule at the bottom of the canvas: the current state in words
-/// plus the controls that belong to it.
-struct ContextBar<Content: View>: View {
-    /// False when the host positions the bar itself (see PDFCanvasView).
-    var floating = true
-    @ViewBuilder var content: Content
+/// Fixed row under the tool strip: the current state in words plus the
+/// controls that belong to it. It never covers the page — a floating bar
+/// sat right on top of signature lines at the bottom of a page.
+struct ContextRow<Leading: View, Trailing: View>: View {
+    let leading: Leading
+    let trailing: Trailing
 
-    init(floating: Bool = true, @ViewBuilder content: () -> Content) {
-        self.floating = floating
-        self.content = content()
+    init(@ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
+        self.leading = leading()
+        self.trailing = trailing()
     }
 
     var body: some View {
         HStack(spacing: 10) {
-            content
+            leading
+            Spacer(minLength: 12)
+            trailing
         }
         .font(.callout)
+        .lineLimit(1)
         .padding(.horizontal, 14)
-        .frame(minHeight: 40)
-        // Clicks on the bar itself (labels, gaps) must not fall through to
-        // the page underneath, where they would start a text or deselect.
-        .contentShape(Capsule())
-        .onTapGesture {}
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
-        .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
-        .padding(.bottom, floating ? 18 : 0)
-        .padding(.horizontal, floating ? 24 : 0)
+        .frame(height: 36)
+        .frame(maxWidth: .infinity)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .overlay(alignment: .bottom) { Divider() }
     }
 }
 
-/// Small borderless icon button for the context bar.
+struct RowDivider: View {
+    var body: some View {
+        Divider().frame(height: 16)
+    }
+}
+
+/// Small borderless icon button for the context row.
 struct BarIconButton: View {
     let systemImage: String
     let help: String
@@ -149,11 +152,13 @@ struct SizeStepper: View {
     var body: some View {
         HStack(spacing: 2) {
             BarIconButton(systemImage: "minus", help: loc("size.smaller"), id: "size.smaller", action: decrease)
+                .uiTestTarget("size.smaller")
             Text(value)
                 .monospacedDigit()
                 .frame(minWidth: 44)
                 .accessibilityLabel("\(label) \(value)")
             BarIconButton(systemImage: "plus", help: loc("size.larger"), id: "size.larger", action: increase)
+                .uiTestTarget("size.larger")
         }
     }
 }

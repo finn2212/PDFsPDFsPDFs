@@ -21,7 +21,7 @@ Oben in der Leiste wechselst du zwischen **Dokument** (unterschreiben und ausfü
 - 🔤 **Text** – Werkzeug an, irgendwo hinklicken, lostippen; Schriftgröße unten in der Leiste. Doppelklick öffnet einen Text wieder.
 - 📅 **Datum** und ✓ **Ankreuzen** (✓ / ✗ / ●) für Formulare ohne Felder.
 - Ausfüllbare Formulare (AcroForms) werden beim Öffnen erkannt und angekündigt – einfach in die Felder klicken.
-- Ausgewähltes Element: Größe, Drehen und Löschen in der schwebenden Leiste unten; Ecken ziehen, blauer Griff dreht, rotes × löscht. Rückgängig/Wiederholen (⌘Z / ⇧⌘Z) für alles.
+- Ausgewähltes Element: Größe, Drehen und Löschen in der Leiste unter den Werkzeugen (sie liegt nie über der Seite); Ecken ziehen, blauer Griff dreht, rotes × löscht. Rückgängig/Wiederholen (⌘Z / ⇧⌘Z) für alles.
 - Funktioniert auch auf gedrehten Seiten (quer gescannte Seiten): Unterschriften stehen aufrecht dort, wo man sie sieht.
 
 ### Seiten: sortieren, löschen, trennen, zusammenfügen

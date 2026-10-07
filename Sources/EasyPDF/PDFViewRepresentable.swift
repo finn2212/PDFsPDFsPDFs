@@ -42,6 +42,12 @@ final class InteractivePDFView: PDFView, NSTextFieldDelegate {
 
     override var acceptsFirstResponder: Bool { true }
 
+    // While a signature waits to be placed, the first click into an inactive
+    // window places it instead of only activating the window.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        model?.pendingStamp != nil || super.acceptsFirstMouse(for: event)
+    }
+
     // Routes Cmd+Z / Cmd+Shift+Z from the Edit menu to our document undo stack.
     override var undoManager: UndoManager? { model?.undoManager }
 
@@ -452,39 +458,6 @@ final class InteractivePDFView: PDFView, NSTextFieldDelegate {
     }
 }
 
-/// The PDF view plus the floating context bar as a real subview on top of
-/// it. A SwiftUI overlay above an AppKit view is not reliably hit-tested
-/// before the view below, so clicks on the bar could land in the PDF.
-final class PDFCanvasView: NSView {
-    let pdfView = InteractivePDFView()
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        pdfView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(pdfView)
-        NSLayoutConstraint.activate([
-            pdfView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            pdfView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            pdfView.topAnchor.constraint(equalTo: topAnchor),
-            pdfView.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// Pins the bar bottom-centre; it sizes itself to its content, so it
-    /// covers exactly the capsule and nothing else.
-    func installBar(_ bar: NSView) {
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(bar, positioned: .above, relativeTo: pdfView)
-        NSLayoutConstraint.activate([
-            bar.centerXAnchor.constraint(equalTo: centerXAnchor),
-            bar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -18),
-            bar.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -48),
-        ])
-    }
-}
-
 struct PDFKitView: NSViewRepresentable {
     @ObservedObject var model: DocumentModel
     static let maxInitialScale: CGFloat = 1.25
@@ -514,9 +487,8 @@ struct PDFKitView: NSViewRepresentable {
         }
     }
 
-    func makeNSView(context: Context) -> PDFCanvasView {
-        let canvas = PDFCanvasView()
-        let view = canvas.pdfView
+    func makeNSView(context: Context) -> InteractivePDFView {
+        let view = InteractivePDFView()
         view.model = model
         view.autoScales = true
         view.displayMode = .singlePageContinuous
@@ -531,12 +503,10 @@ struct PDFKitView: NSViewRepresentable {
                 view.cancelTextEditing()
             }
         }
-        canvas.installBar(NSHostingView(rootView: DocumentContextBar().environmentObject(model)))
-        return canvas
+        return view
     }
 
-    func updateNSView(_ canvas: PDFCanvasView, context: Context) {
-        let view = canvas.pdfView
+    func updateNSView(_ view: InteractivePDFView, context: Context) {
         if view.document !== model.document {
             view.document = model.document
             if let state = model.viewStateToRestore {

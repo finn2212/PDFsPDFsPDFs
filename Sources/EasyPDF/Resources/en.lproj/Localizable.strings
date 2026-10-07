@@ -221,3 +221,4 @@
 "split.done.one" = "%d file saved.";
 "hint.form.one" = "This PDF has %d fillable field – just click into it and type.";
 "convert.pageCount.one" = "%d page will be exported.";
+"hint.idle" = "Choose Sign, Text, Date or Tick – then click into the page.";
