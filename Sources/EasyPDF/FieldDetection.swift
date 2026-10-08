@@ -86,12 +86,6 @@ enum FieldDetector {
                      labels: labels, excluded: widgets)
     }
 
-    static func detect(on page: PDFPage) -> [DetectedField] {
-        let input: Input? = MainActor.assumeIsolated { input(for: page) }
-        guard let input else { return [] }
-        return detect(input)
-    }
-
     // MARK: - Analysis
 
     private struct Box {
