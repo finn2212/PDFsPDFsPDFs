@@ -6,42 +6,45 @@ Native macOS-App (SwiftUI + PDFKit) — dein eigenes, komplett kostenloses PDF-P
 
 ## Features
 
-### Werkzeugleiste (links)
+### Start
 
-Adobe-artige Icon-Leiste; jedes Werkzeug öffnet ein eigenes Panel:
+Drei Wege hinein, ohne Suchen: **PDF öffnen**, **PDFs zusammenfügen**, **Bilder zu PDF** – oder Dateien einfach ins Fenster ziehen (ein PDF wird geöffnet, mehrere werden zusammengefügt, Bilder werden zu einem PDF).
 
-- ✍️ **Signieren** — Personenverwaltung mit gespeicherten Unterschriften & Initialen
-- 📄 **Seiten** — große Seitenvorschau; Rechtsklick: drehen, verschieben, exportieren, löschen
-- ➕ **Zusammenfügen** — mehrere PDFs sortieren und mergen
-- ✂️ **Trennen** — Seitenbereich („1-3, 5“) extrahieren oder alle Seiten einzeln speichern
-- 🔤 **Text & Datum** — Text-Werkzeug im Acrobat-Stil: aktivieren, in die Seite klicken, direkt lostippen
-- 🔄 **Konvertieren** — Bilder → PDF und PDF → Bilder, komplett offline
+### Zwei Ansichten
 
-### Text schreiben
+Oben in der Leiste wechselst du zwischen **Dokument** (unterschreiben und ausfüllen) und **Seiten** (alles, was ganze Seiten betrifft) – oder mit ⌘1 / ⌘2. **Speichern** überschreibt das Original, **Teilen** schickt eine unterschriebene Kopie per Mail, Nachrichten oder AirDrop und lässt das Original unangetastet.
 
-Text-Werkzeug einschalten, an die gewünschte Stelle klicken und tippen — der Text erscheint sofort dort, wo er später steht. Die Schriftgröße lässt sich **während des Tippens** oben in der Leiste ändern, Enter übernimmt, Esc bricht ab. Ein **Doppelklick** auf einen eingefügten Text öffnet ihn wieder zum Bearbeiten. Das heutige Datum gibt es als Ein-Klick-Button.
+### Dokument: unterschreiben und ausfüllen
+
+- ✍️ **Unterschreiben** – ein Klick, und die Unterschrift hängt halbtransparent am Mauszeiger; der nächste Klick setzt sie. Der Pfeil daneben bietet Initialen, **Initialen auf jeder Seite**, weitere Personen und „Neue Unterschrift“.
+- Neue Unterschrift: **Zeichnen**, **Tippen** (in einer Schreibschrift) oder **Bild** (Weiß wird entfernt) – in einem einzigen Fenster, Name optional. Gespeichert nur lokal (`~/Library/Application Support/PDFsPDFsPDFs/`).
+- 🔤 **Ausfüllen** – erkennt freie Stellen wie im Acrobat Reader, auch in Scans: Schreiblinien und „______“, leere Kästen, Ankreuzkästchen und „Name:“ mit Platz dahinter werden blau markiert. Hineinklicken und tippen, der Text sitzt auf der Linie; Tab springt zum nächsten Feld, ein Klick ins Kästchen setzt ✓. Außerhalb der Felder: irgendwo hinklicken und lostippen. Doppelklick öffnet einen Text wieder.
+- 📅 **Datum** und ✓ **Ankreuzen** (✓ / ✗ / ●) für Formulare ohne Felder.
+- Ausfüllbare Formulare (AcroForms) werden beim Öffnen erkannt und angekündigt – einfach in die Felder klicken.
+- Ausgewähltes Element: Größe, Drehen und Löschen in der Leiste unter den Werkzeugen (sie liegt nie über der Seite); Ecken ziehen, blauer Griff dreht, rotes × löscht. Rückgängig/Wiederholen (⌘Z / ⇧⌘Z) für alles.
+- Funktioniert auch auf gedrehten Seiten (quer gescannte Seiten): Unterschriften stehen aufrecht dort, wo man sie sieht.
+
+### Seiten: sortieren, löschen, trennen, zusammenfügen
+
+- Alle Seiten als Raster; Klick wählt, ⇧/⌘-Klick wählt mehrere, ⌫ löscht.
+- **Ziehen zum Sortieren**, **PDFs oder Bilder ins Raster ziehen** fügt sie genau dort ein (Zusammenfügen).
+- **Links/Rechts drehen**, **Löschen**, **Als PDF sichern** (Auswahl als neues PDF).
+- **Trennen**: ✂ zwischen zwei Seiten klicken setzt einen Schnitt – „In 3 PDFs trennen“ schreibt die Teile; alternativ jede Seite als eigenes PDF.
 
 ### Konvertieren
 
-- **Bilder → PDF**: JPEG, PNG, HEIC/HEIF, TIFF, GIF, BMP, WebP, AVIF und **SVG** (echter Vektor mit durchsuchbarem Text). Mehrere Bilder werden per Drag & Drop sortiert und zu einem PDF zusammengefügt.
-- **Mehrseitige TIFFs (Scanner, Fax) und animierte GIFs** werden zu je einer PDF-Seite pro Bild — kein stiller Datenverlust wie bei naiven Konvertern, die nur das erste Bild übernehmen.
+- **Bilder → PDF**: JPEG, PNG, HEIC/HEIF, TIFF, GIF, BMP, WebP, AVIF und **SVG** (echter Vektor mit durchsuchbarem Text). Reihenfolge per Drag & Drop.
+- **Mehrseitige TIFFs (Scanner, Fax) und animierte GIFs** werden zu je einer PDF-Seite pro Bild – kein stiller Datenverlust wie bei naiven Konvertern, die nur das erste Bild übernehmen.
 - Seitengröße wählbar (**Auf A4/Letter einpassen**, Originalgröße nach DPI oder Pixel); **verlustfrei** (JPEG wird byte-genau durchgereicht) oder **kleinere Datei** mit JPEG-Qualitätsregler. EXIF-Drehung von Handyfotos wird korrekt berücksichtigt.
-- **PDF → Bilder**: jede Seite als PNG, JPEG, TIFF, HEIC oder AVIF in 150/300/600 dpi.
+- **PDF → Bilder** (Ablage › Als Bilder exportieren): jede Seite als PNG, JPEG, TIFF, HEIC oder AVIF in 150/300/600 dpi.
 - Alles rein nativ (CoreGraphics/ImageIO/PDFKit), **lokal, ohne Upload**.
-
-### Unterschreiben
-
-- Beliebig viele Personen; pro Person **Unterschrift** und **Initialen**, dauerhaft gespeichert (`~/Library/Application Support/PDFsPDFsPDFs/`).
-- Erfassung per *Zeichnen* (Maus/Trackpad) oder *Bildimport* (optional mit automatischer Weiß-Entfernung).
-- Platzieren per Klick; danach Auswahl-Widget direkt an der Unterschrift: **Ecken ziehen = Größe**, **blauer Griff unten = frei drehen** (Shift rastet in 15°-Schritten; alternativ die Drehen-Buttons in der Leiste), **rotes × = löschen**, Ziehen = verschieben.
-- **Rückgängig/Wiederholen** (Cmd+Z / Cmd+Shift+Z) für alles.
-- Formularfelder (AcroForms) füllt PDFKit direkt aus.
 
 ### Speichern & Komfort
 
 - PDF öffnen per Finder-Doppelklick („Öffnen mit“), Dock-Drop, Drag & Drop, „Zuletzt geöffnet“.
-- **Cmd+S** überschreibt das Original — Unterschriften werden **fest eingebrannt** (geflattet). **Cmd+Shift+S** = Speichern unter. Reine Seiten-Operationen werden verlustfrei gespeichert (Text/Links/Formulare bleiben erhalten).
-- Drucken (Cmd+P), Zoom (Cmd +/−/0), Deutsch + Englisch.
+- **⌘S** überschreibt das Original – Unterschriften werden **fest eingebrannt** (geflattet). **⇧⌘S** = Speichern unter, **Kopie sichern…** lässt das Original unangetastet. Reine Seiten-Operationen werden verlustfrei gespeichert (Text/Links/Formulare bleiben erhalten).
+- Werkzeuge per Tastatur: ⇧⌘U Unterschreiben, ⇧⌘T Ausfüllen, ⇧⌘D Datum, ⇧⌘K Häkchen.
+- Drucken (⌘P), Zoom (⌘ +/−/0), Deutsch + Englisch, hell und dunkel.
 
 ## Installation
 
@@ -81,24 +84,47 @@ Die App findet Updates über `SUFeedURL` → `releases/latest/download/appcast.x
 ## Selbsttest
 
 ```bash
-swift build && .build/debug/EasyPDF --selftest
+swift build
+DYLD_FRAMEWORK_PATH=.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64 \
+  "$(swift build --show-bin-path)/EasyPDF" --selftest
 ```
 
-Verifiziert headless auf Pixelebene: Stempel-Flattening, Merge, Seitenbereichs-Parser, Extraktion, Einzelseiten-Split, Seitenlöschung + verlustfreies Schreiben, 90°-Rotation, Text-/Stroke-Rendering sowie die Konvertierung (A4-MediaBox statt Letter, EXIF-Orientierung, mehrseitiges TIFF → mehrere Seiten, Ablehnung von PDF-Eingaben, PDF→Bild-Export).
+Verifiziert headless auf Pixelebene: Stempel-Flattening, Merge, Seitenbereichs-Parser, Extraktion, Einzelseiten-Split, Seitenlöschung + verlustfreies Schreiben, 90°-Rotation, Text-/Stroke-Rendering, die Konvertierung (A4-MediaBox statt Letter, EXIF-Orientierung, mehrseitiges TIFF → mehrere Seiten, Ablehnung von PDF-Eingaben, PDF→Bild-Export) sowie die Seiten-Ansicht: Verschieben/Löschen/Drehen/Einfügen mit Rückgängig und Wiederholen, Mehrfachauswahl, Trennen an Schnitten, Initialen auf gedrehten Seiten und der Teilen-Export ohne Platzier-Vorschau.
+
+### Oberfläche als Bilder rendern (Debug-Builds)
+
+```bash
+swift build
+DYLD_FRAMEWORK_PATH=.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64 \
+  "$(swift build --show-bin-path)/EasyPDF" --snapshot /tmp/ui beispiel.pdf zweites.pdf
+```
+
+Klick-Test mit echten Maus- und Tastatur-Ereignissen (Text setzen, mit +/− und Eckgriff vergrößern/verkleinern, anklicken, per Doppelklick bearbeiten, Unterschrift mit Vorschau setzen, löschen, Rückgängig) – prüft nach jedem Schritt den Zustand und legt pro Schritt ein Bild ab:
+
+```bash
+DYLD_FRAMEWORK_PATH=.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64 \
+  "$(swift build --show-bin-path)/EasyPDF" --uitest /tmp/uitest beispiel.pdf
+```
+
+Der Snapshot-Modus rendert Startbildschirm, Dokument- und Seiten-Ansicht, Unterschriften-Editor und Konverter in festen Zuständen (hell und dunkel) als PNG – die Fenster liegen außerhalb des Bildschirms, nichts blitzt auf. `SNAPSHOT_ONLY=<teil-des-namens>` rendert nur passende Zustände. UX-Analyse und Zielstruktur: [docs/ux/analysis.md](docs/ux/analysis.md).
 
 ## Projektstruktur
 
 - `Sources/EasyPDF/EasyPDFApp.swift` – App-Einstieg, Menüs, Sparkle-Updater, Finder-Open-Handler
-- `Sources/EasyPDF/ContentView.swift` – Layout mit Werkzeug-Rail, Toolbar, Startbildschirm
-- `Sources/EasyPDF/ToolRail.swift` – Icon-Leiste + Panel-Container
-- `Sources/EasyPDF/ToolPanels.swift` – Panels: Zusammenfügen, Trennen, Text & Datum
-- `Sources/EasyPDF/Convert/` – Konverter: `ConvertTypes` (Optionen/Fehler/Warnungen), `ImageToPDF`, `PDFToImage`, `ConvertPanel` (UI)
-- `Sources/EasyPDF/Sidebar.swift` – Personen-Panel + Personen-Editor
-- `Sources/EasyPDF/ThumbnailSidebar.swift` – Seiten-Panel
-- `Sources/EasyPDF/SignatureCapture.swift` – Zeichenfläche + Bildimport
-- `Sources/EasyPDF/DocumentModel.swift` – Dokumentzustand, Stempel, Undo, Flattening, Seiten-Ops
+- `Sources/EasyPDF/ContentView.swift` – Fenster: Startbildschirm oder Dokument, Toolbar (Ansicht, Speichern, Teilen), alle Sheets und Dialoge
+- `Sources/EasyPDF/StartView.swift` – Startbildschirm mit Drop-Zone und „Zuletzt geöffnet“
+- `Sources/EasyPDF/DocumentWorkspace.swift` – Ansicht „Dokument“: Werkzeugleiste, Seitenleiste, Kontextleiste
+- `Sources/EasyPDF/PagesView.swift` – Ansicht „Seiten“: Raster, Auswahl, Drag & Drop, Schnitte
+- `Sources/EasyPDF/Signatures.swift` – Unterschreiben (Ein-Klick + Menü) und Unterschriften-Editor (Zeichnen/Tippen/Bild)
+- `Sources/EasyPDF/FieldDetection.swift`, `DocumentModel+Fields.swift` – Erkennung freier Felder (Linien, Kästen, Kästchen, „Label:“) und Ausfüllen per Klick/Tab
+- `Sources/EasyPDF/Components.swift` – gemeinsame Bausteine (Werkzeug-Buttons, Kontextleiste, Drop-Hervorhebung)
+- `Sources/EasyPDF/DocumentModel.swift` – Dokumentzustand, Stempel, Undo, Flattening, Platzier-Vorschau
+- `Sources/EasyPDF/DocumentModel+Pages.swift` – Seiten-Operationen auf Auswahlen (verschieben, löschen, drehen, einfügen, trennen)
+- `Sources/EasyPDF/DocumentModel+Files.swift` – Öffnen, Zusammenfügen, Drops, Teilen, Datei-Dialoge
+- `Sources/EasyPDF/Convert/` – Konverter: `ConvertTypes`, `ImageToPDF`, `PDFToImage`, `ConvertSheets` (UI)
 - `Sources/EasyPDF/PDFTools.swift` – Merge, Split, Extract, Range-Parser
-- `Sources/EasyPDF/PDFViewRepresentable.swift` – interaktive PDF-Ansicht (Auswahl-Widget)
-- `Sources/EasyPDF/ImageUtils.swift` – Stroke-/Text-Rendering, Weiß-Entfernung
+- `Sources/EasyPDF/PDFViewRepresentable.swift` – interaktive PDF-Ansicht (Auswahl-Widget, Inline-Text, Vorschau)
+- `Sources/EasyPDF/ImageUtils.swift` – Stroke-/Text-/Schreibschrift-Rendering, Weiß-Entfernung
+- `Sources/EasyPDF/SelfTest.swift`, `Snapshot*.swift`, `UITest.swift` – Selbsttest, UI-Renderer und Klick-Test (die beiden letzten nur in Debug-Builds)
 - `Sources/EasyPDF/Resources/{de,en}.lproj/` – Übersetzungen
-- `assets/` – Logo + AppIcon, `scripts/` – Release-Tooling
+- `assets/` – Logo + AppIcon, `scripts/` – Release-Tooling, `docs/ux/` – UX-Analyse

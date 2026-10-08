@@ -1,0 +1,24 @@
+# Builds and self-tests every pull request and every push to main on the same
+# runner image as the release workflow, so a release never fails to compile.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app (universal, release)
+        run: ./build_app.sh
+
+      - name: Self-test (release build)
+        run: dist/PDFsPDFsPDFs.app/Contents/MacOS/EasyPDF --selftest
+
+      # Debug-only tooling (--snapshot, --uitest) must keep compiling too.
+      - name: Build debug
+        run: swift build

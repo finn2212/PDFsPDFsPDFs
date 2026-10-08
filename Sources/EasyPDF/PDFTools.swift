@@ -53,6 +53,26 @@ enum PDFTools {
         return result.isEmpty ? nil : result
     }
 
+    /// Formats 0-based indices as a compact 1-based label: [0,1,2,4] → "1–3, 5".
+    static func rangeLabel(_ indices: [Int]) -> String {
+        let sorted = Array(Set(indices)).sorted()
+        var parts: [String] = []
+        var start: Int?
+        var previous: Int?
+        for index in sorted + [Int.min] {
+            if let p = previous, index == p + 1 {
+                previous = index
+                continue
+            }
+            if let s = start, let p = previous {
+                parts.append(s == p ? "\(s + 1)" : "\(s + 1)–\(p + 1)")
+            }
+            start = index
+            previous = index
+        }
+        return parts.joined(separator: ", ")
+    }
+
     static func extract(from document: PDFDocument, pageIndices: [Int], to destination: URL) throws {
         let out = PDFDocument()
         for index in pageIndices {

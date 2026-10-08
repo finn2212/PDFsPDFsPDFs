@@ -19,6 +19,14 @@ enum SelfTest {
             try testConvertMultiFrame()
             try testConvertRejectsPDFInput()
             try testPDFToImageExport()
+            try MainActor.assumeIsolated {
+                try testPageOperations()
+                try testSplitAtCutMarks()
+                try testInitialsOnRotatedPage()
+                try testShareExport()
+                try testSaveKeepsPageStateAndFormEdits()
+                try testFieldDetection()
+            }
             print("SELFTEST PASS")
             exit(0)
         } catch {
@@ -569,5 +577,268 @@ enum SelfTest {
         }
         try assertColor(left, r: 0.7...1.0, g: 0.0...0.4, b: 0.0...0.4, what: "export left half")
         try assertColor(right, r: 0.0...0.4, g: 0.7...1.0, b: 0.0...0.4, what: "export right half")
+    }
+
+    // MARK: - Page grid operations (v2)
+
+    private static let palette: [CGColor] = [
+        CGColor(red: 1, green: 0, blue: 0, alpha: 1), CGColor(red: 0, green: 1, blue: 0, alpha: 1),
+        CGColor(red: 0, green: 0, blue: 1, alpha: 1), CGColor(red: 1, green: 1, blue: 0, alpha: 1),
+        CGColor(red: 0, green: 1, blue: 1, alpha: 1),
+    ]
+
+    /// A fresh model holding five single-colour pages, undo grouped per call.
+    @MainActor
+    private static func makeModel() throws -> (DocumentModel, [PDFPage]) {
+        let urls = try palette.enumerated().map {
+            try makePDF(name: "ops-\($0.offset).pdf", size: CGSize(width: 200, height: 200), fill: $0.element)
+        }
+        let model = DocumentModel()
+        model.undoManager.groupsByEvent = false
+        model.openUntitled(try FileImport.document(from: urls), name: "Test", mode: .pages)
+        guard model.pageCount == 5 else { throw TestError.message("merge into model: \(model.pageCount) pages") }
+        return (model, model.pages)
+    }
+
+    @MainActor
+    private static func step(_ model: DocumentModel, _ action: () -> Void) {
+        model.undoManager.beginUndoGrouping()
+        action()
+        model.undoManager.endUndoGrouping()
+    }
+
+    @MainActor
+    private static func assertOrder(_ model: DocumentModel, _ expected: [PDFPage], _ what: String) throws {
+        guard model.pages.count == expected.count, zip(model.pages, expected).allSatisfy({ $0 === $1 }) else {
+            throw TestError.message("\(what): unexpected page order")
+        }
+    }
+
+    @MainActor
+    private static func testPageOperations() throws {
+        let (model, p) = try makeModel()
+
+        // Drag pages 4 and 5 to the front, undo, redo.
+        step(model) { model.movePages([3, 4], to: 0) }
+        try assertOrder(model, [p[3], p[4], p[0], p[1], p[2]], "move block to front")
+        model.undo()
+        try assertOrder(model, p, "undo move")
+        model.redo()
+        try assertOrder(model, [p[3], p[4], p[0], p[1], p[2]], "redo move")
+        model.undo()
+
+        // Drop page 1 behind page 3 (insertion index 3 = before page 4).
+        step(model) { model.movePages([0], to: 3) }
+        try assertOrder(model, [p[1], p[2], p[0], p[3], p[4]], "move one page back")
+        model.undo()
+
+        // Delete pages 2 and 4 in one step; never all pages.
+        step(model) { model.deletePages([1, 3]) }
+        try assertOrder(model, [p[0], p[2], p[4]], "delete two pages")
+        model.undo()
+        try assertOrder(model, p, "undo delete")
+        step(model) { model.deletePages([0, 1, 2, 3, 4]) }
+        guard model.pageCount == 5 else { throw TestError.message("deleting every page must be refused") }
+
+        // Rotate a selection.
+        step(model) { model.rotatePages([0, 2], clockwise: true) }
+        guard p[0].rotation == 90, p[1].rotation == 0, p[2].rotation == 90 else {
+            throw TestError.message("rotate selection")
+        }
+        model.undo()
+        guard p[0].rotation == 0, p[2].rotation == 0 else { throw TestError.message("undo rotate") }
+
+        // Insert a PDF (merge) after page 2, undo.
+        let extra = try makePDF(name: "ops-extra.pdf", size: CGSize(width: 200, height: 200),
+                                fill: CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+        step(model) { model.insertFiles([extra], at: 2) }
+        guard model.pageCount == 6, model.selectedIndices == [2] else {
+            throw TestError.message("insert file: \(model.pageCount) pages, selection \(model.selectedIndices)")
+        }
+        model.undo()
+        try assertOrder(model, p, "undo insert")
+
+        // Click, ⇧-click, ⌘-click.
+        model.selectPage(at: 1, extend: false, range: false)
+        model.selectPage(at: 3, extend: false, range: true)
+        guard model.selectedIndices == [1, 2, 3] else { throw TestError.message("range selection") }
+        model.selectPage(at: 2, extend: true, range: false)
+        guard model.selectedIndices == [1, 3] else { throw TestError.message("toggle selection") }
+
+        guard PDFTools.rangeLabel([0, 1, 2, 4]) == "1–3, 5", PDFTools.rangeLabel([6]) == "7" else {
+            throw TestError.message("range label")
+        }
+    }
+
+    @MainActor
+    private static func testSplitAtCutMarks() throws {
+        let (model, p) = try makeModel()
+        model.toggleCut(after: p[1])
+        model.toggleCut(after: p[3])
+        model.toggleCut(after: p[4]) // after the last page: no extra part
+        guard model.parts == [[0, 1], [2, 3], [4]] else { throw TestError.message("parts \(model.parts)") }
+
+        // Cuts follow their page when pages move.
+        step(model) { model.movePages([1], to: 0) }
+        guard model.parts == [[0], [1, 2, 3], [4]] else {
+            throw TestError.message("parts after move \(model.parts)")
+        }
+        model.undo()
+
+        let folder = dir.appendingPathComponent("parts", isDirectory: true)
+        try? FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        guard try model.splitAtCutMarks(folder: folder) == 3 else { throw TestError.message("split count") }
+        let counts = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .map { PDFDocument(url: $0)?.pageCount ?? -1 }
+        guard counts == [2, 2, 1] else { throw TestError.message("split page counts \(counts)") }
+    }
+
+    /// Initials on every page must land in the lower right corner *as seen*,
+    /// upright, also on rotated pages.
+    @MainActor
+    private static func testInitialsOnRotatedPage() throws {
+        let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+        let url = try makePDF(name: "initials-src.pdf", size: CGSize(width: 300, height: 400), fill: white)
+        let model = DocumentModel()
+        model.undoManager.groupsByEvent = false
+        model.openUntitled(try FileImport.document(from: [url, url, url, url]), name: "Initials", mode: .document)
+        for (index, rotation) in [0, 90, 180, 270].enumerated() {
+            model.document?.page(at: index)?.rotation = rotation
+        }
+        // Red block, wider than tall, so a sideways placement would show.
+        let red = NSImage(size: NSSize(width: 60, height: 20), flipped: false) { rect in
+            NSColor.red.setFill()
+            rect.fill()
+            return true
+        }
+        step(model) { model.placeOnEveryPage(image: red, width: 60) }
+        guard model.stamps.count == 4 else { throw TestError.message("initials on every page: \(model.stamps.count)") }
+
+        let out = dir.appendingPathComponent("initials-out.pdf")
+        try model.exportCurrentState(to: out)
+        guard let flat = PDFDocument(url: out), flat.pageCount == 4 else {
+            throw TestError.message("initials export")
+        }
+        for index in 0..<4 {
+            guard let page = flat.page(at: index) else { continue }
+            let size = page.bounds(for: .mediaBox).size
+            let rep = try rasterize(page, size: size)
+            // 28 pt margin, 60×20 block: (x 212…272, y 28…48) from the lower left as shown.
+            let inside = try pixel(rep, pageSize: size, x: size.width - 28 - 30, y: 28 + 10)
+            try assertColor(inside, r: 0.7...1, g: 0...0.35, b: 0...0.35, what: "initials page \(index + 1)")
+            // Just above the block must be white: proves the block lies flat, not on its side.
+            let above = try pixel(rep, pageSize: size, x: size.width - 28 - 30, y: 28 + 20 + 12)
+            try assertColor(above, r: 0.85...1, g: 0.85...1, b: 0.85...1, what: "above initials page \(index + 1)")
+        }
+    }
+
+    @MainActor
+    private static func testShareExport() throws {
+        let (model, _) = try makeModel()
+        model.untitledName = "Vertrag"
+        guard model.exportFileName == "Vertrag.pdf" else { throw TestError.message("share name \(model.exportFileName)") }
+        let red = NSImage(size: NSSize(width: 40, height: 20), flipped: false) { rect in
+            NSColor.red.setFill(); rect.fill(); return true
+        }
+        guard let page = model.document?.page(at: 0) else { return }
+        model.startPlacing(image: red, defaultWidth: 40, label: "x")
+        // A placement preview must never end up in an export.
+        model.updateGhost(at: CGPoint(x: 150, y: 150), on: page)
+        model.startPlacing(image: red, defaultWidth: 40, label: "x")
+        step(model) { model.place(at: CGPoint(x: 50, y: 50), on: page) }
+        guard model.exportFileName.hasSuffix(loc("save.suffix") + ".pdf") else {
+            throw TestError.message("signed share name \(model.exportFileName)")
+        }
+        model.startPlacing(image: red, defaultWidth: 40, label: "x")
+        model.updateGhost(at: CGPoint(x: 150, y: 150), on: page)
+        let url = try model.exportForSharing()
+        guard let shared = PDFDocument(url: url), shared.pageCount == 5,
+              url.lastPathComponent == model.exportFileName else {
+            throw TestError.message("share export")
+        }
+        let rep = try rasterize(shared.page(at: 0)!, size: CGSize(width: 200, height: 200))
+        try assertColor(try pixel(rep, pageSize: CGSize(width: 200, height: 200), x: 50, y: 50),
+                        r: 0.7...1, g: 0...0.35, b: 0...0.35, what: "shared stamp")
+        // Ghost spot keeps the page colour (red page 1 → still red, so check via stamp count instead).
+        guard page.annotations.filter({ ($0 as? ImageStampAnnotation)?.opacity ?? 1 < 1 }).isEmpty else {
+            throw TestError.message("ghost still on the page after export")
+        }
+    }
+
+    /// Saving reloads the file: cut marks and selection must follow by index,
+    /// and filled-in form fields must count as unsaved changes.
+    @MainActor
+    private static func testSaveKeepsPageStateAndFormEdits() throws {
+        let (model, p) = try makeModel()
+        if let page = model.document?.page(at: 0) {
+            let field = PDFAnnotation(bounds: CGRect(x: 20, y: 20, width: 120, height: 20),
+                                      forType: .widget, withProperties: nil)
+            field.widgetFieldType = .text
+            field.fieldName = "name"
+            page.addAnnotation(field)
+        }
+        model.toggleCut(after: p[1])
+        model.selectPage(at: 3, extend: false, range: false)
+        let url = dir.appendingPathComponent("save-state.pdf")
+        model.save(to: url)
+        guard model.fileURL == url, model.parts == [[0, 1], [2, 3, 4]], model.selectedIndices == [3] else {
+            throw TestError.message("save lost cut marks or selection: parts \(model.parts), selection \(model.selectedIndices)")
+        }
+        guard model.formFieldCount == 1, !model.formChangedSinceLoad, !model.hasChanges else {
+            throw TestError.message("form state after save")
+        }
+        // Typing into a field happens inside PDFKit; the value comparison must see it.
+        model.document?.page(at: 0)?.annotations.first { $0.fieldName == "name" }?.widgetStringValue = "Finn"
+        guard model.formChangedSinceLoad else { throw TestError.message("form edit not detected") }
+    }
+
+    /// A form without form fields: lines, a label with space after it, an
+    /// empty box and checkboxes are found; round letters, a rule across the
+    /// page and a table are not.
+    @MainActor
+    private static func testFieldDetection() throws {
+        let url = dir.appendingPathComponent("fields.pdf")
+        var box = CGRect(x: 0, y: 0, width: 595, height: 842)
+        guard let ctx = CGContext(url as CFURL, mediaBox: &box, nil) else { throw TestError.message("fields ctx") }
+        ctx.beginPDFPage(nil)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        let font: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.black]
+        func text(_ s: String, _ x: CGFloat, _ y: CGFloat) { (s as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: font) }
+        func line(_ x0: CGFloat, _ y: CGFloat, _ x1: CGFloat) {
+            ctx.setLineWidth(0.8); ctx.move(to: CGPoint(x: x0, y: y)); ctx.addLine(to: CGPoint(x: x1, y: y)); ctx.strokePath()
+        }
+        ctx.setStrokeColor(NSColor.black.cgColor)
+        line(60, 760, 535)                                       // rule across the page: no field
+        text("Oo0 Ordnung, Datum:", 60, 700)                     // round letters, label with space
+        text("Straße:", 60, 660); line(120, 658, 380)            // line after a label
+        ctx.stroke(CGRect(x: 60, y: 600, width: 11, height: 11)) // checkbox
+        ctx.stroke(CGRect(x: 60, y: 500, width: 300, height: 60)) // empty box
+        for i in 0...2 { line(60, 400 - CGFloat(i) * 20, 300) }  // table grid: no field
+        for x in [60, 180, 300] as [CGFloat] {
+            ctx.move(to: CGPoint(x: x, y: 400)); ctx.addLine(to: CGPoint(x: x, y: 360)); ctx.strokePath()
+        }
+        line(60, 200, 260)                                        // signature line
+        NSGraphicsContext.restoreGraphicsState()
+        ctx.endPDFPage()
+        ctx.closePDF()
+
+        guard let page = PDFDocument(url: url)?.page(at: 0), let input = FieldDetector.input(for: page) else {
+            throw TestError.message("fields input")
+        }
+        let fields = FieldDetector.detect(input)
+        let kinds = fields.map(\.kind)
+        let summary = fields.map { "\($0.kind)@\(Int($0.rect.minX)),\(Int($0.rect.minY))" }.joined(separator: " ")
+        guard kinds.filter({ $0 == .checkbox }).count == 1,
+              kinds.filter({ $0 == .box }).count == 1,
+              kinds.filter({ $0 == .label }).count == 1,
+              kinds.filter({ $0 == .line }).count == 2,
+              !fields.contains(where: { $0.rect.minY > 740 }),             // not the rule
+              !fields.contains(where: { $0.rect.minY > 355 && $0.rect.maxY < 410 }) // not the table
+        else {
+            throw TestError.message("field detection: \(summary)")
+        }
     }
 }

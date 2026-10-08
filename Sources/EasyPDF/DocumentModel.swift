@@ -12,7 +12,16 @@ struct PlacedStamp: Identifiable {
     let image: NSImage
     /// Set for text stamps, which stay re-editable via double-click.
     var text: String? = nil
+    /// Font size the image was rendered at.
     var fontSize: CGFloat = 14
+
+    /// Font size as currently shown: dragging a corner scales the rendered
+    /// text, so the size follows the rect. renderText draws at 3x.
+    var effectiveFontSize: CGFloat {
+        let naturalWidth = image.size.width / 3
+        guard naturalWidth > 0 else { return fontSize }
+        return fontSize * rect.width / naturalWidth
+    }
 }
 
 struct PendingStamp {
@@ -37,6 +46,8 @@ final class ImageStampAnnotation: PDFAnnotation {
     let image: NSImage
     let stampID: UUID
     var isSelectedUI = false
+    /// Below 1 for the placement preview that follows the cursor.
+    var opacity: CGFloat = 1
     /// Unrotated image rect in page coordinates.
     var imageRect: CGRect = .zero
     /// Rotation in degrees around the image rect's center.
@@ -134,10 +145,18 @@ final class ImageStampAnnotation: PDFAnnotation {
         let center = CGPoint(x: rect.midX, y: rect.midY)
 
         context.saveGState()
+        // PDFKit hands custom annotations an untransformed context: unlike
+        // standard annotations they would ignore the page rotation and the
+        // crop box offset. Map page space to the displayed page ourselves.
+        if let page {
+            context.concatenate(page.transform(for: box))
+        }
         context.translateBy(x: center.x, y: center.y)
         context.rotate(by: rotationDegrees * .pi / 180)
         context.translateBy(x: -center.x, y: -center.y)
+        context.setAlpha(opacity)
         context.draw(cg, in: rect)
+        context.setAlpha(1)
 
         if isSelectedUI {
             let accent = NSColor.controlAccentColor.cgColor
@@ -243,15 +262,96 @@ enum RecentsStore {
     }
 }
 
+/// The two views of an open document: working on its content, or on its pages.
+enum WorkspaceMode: String, CaseIterable, Identifiable {
+    case document
+    case pages
+
+    var id: String { rawValue }
+    var title: String { loc("mode.\(rawValue)") }
+    var icon: String { self == .document ? "doc.richtext" : "square.grid.2x2" }
+}
+
+/// Files dropped onto an open document, waiting for "append or open?".
+struct PendingDrop: Identifiable {
+    let id = UUID()
+    let urls: [URL]
+}
+
+/// Images waiting for the images → PDF sheet.
+struct ImagesRequest: Identifiable {
+    let id = UUID()
+    let urls: [URL]
+}
+
 @MainActor
 final class DocumentModel: ObservableObject {
     static let shared = DocumentModel()
 
     @Published var document: PDFDocument?
     @Published var fileURL: URL?
+    /// Name for documents that exist only in memory (e.g. a merge result).
+    @Published var untitledName: String?
+    @Published var mode: WorkspaceMode = .document {
+        willSet {
+            // The PDF view is rebuilt when coming back; remember where we were.
+            if mode == .document, newValue == .pages, let page = pdfView?.currentPage, let document {
+                resumePageIndex = document.index(for: page)
+            }
+        }
+        didSet { if mode == .pages { endTools() } }
+    }
+    /// Page to show when the PDF view is (re)created; consumed once.
+    var resumePageIndex: Int?
+    /// Zoom and page to keep when saving swaps in the reloaded document.
+    var viewStateToRestore: ViewState?
+    @Published var errorTitle = ""
+
+    struct ViewState {
+        let scale: CGFloat
+        let autoScales: Bool
+        let pageIndex: Int?
+    }
+
+    func showError(_ message: String, title: String) {
+        errorTitle = title
+        saveErrorMessage = message
+    }
+
+    /// Form field values when the document was loaded or last saved; a
+    /// fallback for edits PDFKit makes without telling us.
+    private var formValuesAtLoad: [String] = []
+
+    private static func formValues(in doc: PDFDocument) -> [String] {
+        (0..<doc.pageCount).flatMap { index in
+            (doc.page(at: index)?.annotations ?? [])
+                .filter { $0.type == "Widget" || $0.type == "/Widget" }
+                .map { "\($0.fieldName ?? "")=\($0.widgetStringValue ?? "")|\($0.buttonWidgetState.rawValue)" }
+        }
+    }
+
+    /// True if a form field differs from its value at load/save time.
+    var formChangedSinceLoad: Bool {
+        guard let document, formFieldCount > 0 else { return false }
+        return Self.formValues(in: document) != formValuesAtLoad
+    }
+
+    /// A form field was filled in or toggled (PDFKit edits widgets itself).
+    func noteFormEdit() {
+        guard document != nil, !hasChanges else { return }
+        hasChanges = true
+    }
     @Published var stamps: [PlacedStamp] = []
     @Published var selectedStampID: UUID?
-    @Published var pendingStamp: PendingStamp?
+    @Published var pendingStamp: PendingStamp? {
+        didSet {
+            if pendingStamp != nil {
+                if textToolActive { textToolActive = false }
+            } else {
+                removeGhost()
+            }
+        }
+    }
     @Published var statusMessage: String?
     @Published var saveErrorMessage: String?
     @Published var hasChanges = false
@@ -260,16 +360,54 @@ final class DocumentModel: ObservableObject {
     @Published var canUndo = false
     @Published var canRedo = false
     /// Acrobat-style text tool: click into the page, then type right there.
-    @Published var textToolActive = false
+    @Published var textToolActive = false {
+        didSet {
+            if textToolActive {
+                if pendingStamp != nil { pendingStamp = nil }
+                select(nil)
+            } else if oldValue {
+                finishInlineEditing?(true)
+                hoveredFieldID = nil
+            }
+            onFieldsChanged?()
+        }
+    }
     @Published var textToolFontSize: CGFloat = 14
-    /// True while the inline editor has focus (drives the toolbar size control).
+    /// True while the inline editor has focus (drives the size control).
     @Published var isEditingText = false
+    /// Pages selected in the page grid, by page identity (survives reordering).
+    @Published var selectedPages: Set<ObjectIdentifier> = []
+    /// Cut marks: a new part starts after each of these pages.
+    @Published var cutMarks: Set<ObjectIdentifier> = []
+    /// Number of fillable form fields in the open document.
+    @Published var formFieldCount = 0
+    @Published var formHintDismissed = false
+    @Published var pendingDrop: PendingDrop?
+    @Published var imagesRequest: ImagesRequest?
+    @Published var exportImagesRequested = false
+    /// Signature editor sheet: the person being edited, and which asset.
+    @Published var signatureEditor: SignatureEditorRequest?
 
     weak var pdfView: PDFView?
     /// Set by the PDF view so the model can close an open inline text editor
     /// before it swaps or mutates the document (true = commit, false = discard).
     var finishInlineEditing: ((Bool) -> Void)?
     private var annotationsByID: [UUID: ImageStampAnnotation] = [:]
+    /// Semi-transparent preview of the pending stamp under the cursor.
+    private var ghost: ImageStampAnnotation?
+    /// Anchor for ⇧-click range selection in the page grid.
+    var lastClickedPage: ObjectIdentifier?
+    /// Fill-in areas found on each page (see FieldDetector).
+    @Published var detectedFields: [ObjectIdentifier: [DetectedField]] = [:]
+    @Published var hoveredFieldID: UUID?
+    /// Bumped per document so late detection results of an old one are dropped.
+    var detectionGeneration = 0
+    /// Pages still waiting for field detection.
+    var detectionQueue: [PDFPage] = []
+    /// Called when overlays need repainting (fields, hover, tool, stamps).
+    var onFieldsChanged: (() -> Void)?
+    /// Identifies the page drag in flight, so only our own drags reorder.
+    var pageDragToken: String?
 
     let undoManager = UndoManager()
     private var undoObservers: [NSObjectProtocol] = []
@@ -295,6 +433,30 @@ final class DocumentModel: ObservableObject {
 
     var pageCount: Int { document?.pageCount ?? 0 }
 
+    /// File name shown in the title bar.
+    var displayName: String {
+        fileURL?.lastPathComponent ?? untitledName.map { $0 + ".pdf" } ?? loc("app.name")
+    }
+
+    /// Base for derived file names ("<base> – Seite 1.pdf").
+    var baseName: String {
+        fileURL?.deletingPathExtension().lastPathComponent ?? untitledName ?? loc("file.untitled")
+    }
+
+    /// The pages in their current order.
+    var pages: [PDFPage] {
+        guard let document else { return [] }
+        return (0..<document.pageCount).compactMap { document.page(at: $0) }
+    }
+
+    /// Ends every tool and placement, e.g. before switching to the page grid.
+    func endTools() {
+        finishInlineEditing?(true)
+        if textToolActive { textToolActive = false }
+        if pendingStamp != nil { pendingStamp = nil }
+        select(nil)
+    }
+
     var selectedStamp: PlacedStamp? {
         stamps.first { $0.id == selectedStampID }
     }
@@ -304,7 +466,7 @@ final class DocumentModel: ObservableObject {
     /// Asks the user what to do with unsaved changes. Returns false if the
     /// current action should be cancelled.
     func confirmDiscardIfNeeded() -> Bool {
-        guard hasChanges, document != nil else { return true }
+        guard hasChanges || formChangedSinceLoad, document != nil else { return true }
         let alert = NSAlert()
         alert.messageText = loc("unsaved.title")
         alert.informativeText = loc("unsaved.message")
@@ -314,7 +476,7 @@ final class DocumentModel: ObservableObject {
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             saveInPlace()
-            return !hasChanges // save failed/cancelled → keep current document
+            return !hasChanges && !formChangedSinceLoad // save failed/cancelled → keep current document
         case .alertSecondButtonReturn:
             return true
         default:
@@ -326,19 +488,77 @@ final class DocumentModel: ObservableObject {
         // An open editor belongs to the outgoing document; keep what was typed.
         finishInlineEditing?(true)
         guard confirmDiscardIfNeeded() else { return }
-        guard let doc = PDFDocument(url: url) else { return }
+        guard let doc = PDFDocument(url: url) else {
+            showError(loc("error.cantOpen", url.lastPathComponent), title: loc("alert.openError"))
+            return
+        }
+        load(doc, url: url, untitledName: nil, mode: .document)
+        RecentsStore.add(url)
+    }
+
+    /// Shows an in-memory document (merge result, converted images) that has
+    /// no file yet; saving asks for a location.
+    @discardableResult
+    func openUntitled(_ doc: PDFDocument, name: String, mode: WorkspaceMode) -> Bool {
+        finishInlineEditing?(true)
+        guard confirmDiscardIfNeeded() else { return false }
+        load(doc, url: nil, untitledName: name, mode: mode)
+        hasChanges = true
+        return true
+    }
+
+    private func load(_ doc: PDFDocument, url: URL?, untitledName: String?, mode: WorkspaceMode) {
+        endTools()
+        resumePageIndex = nil
         document = doc
         fileURL = url
+        self.untitledName = untitledName
         stamps = []
         annotationsByID = [:]
         selectedStampID = nil
-        pendingStamp = nil
+        selectedPages = []
+        cutMarks = []
+        lastClickedPage = nil
         statusMessage = nil
         hasChanges = false
+        formFieldCount = Self.countFormFields(in: doc)
+        formValuesAtLoad = Self.formValues(in: doc)
+        formHintDismissed = false
         docRevision += 1
         undoManager.removeAllActions()
         refreshUndoState()
-        RecentsStore.add(url)
+        self.mode = mode
+        detectFields()
+    }
+
+    /// Back to the start screen.
+    func close() {
+        finishInlineEditing?(true)
+        guard confirmDiscardIfNeeded() else { return }
+        endTools()
+        document = nil
+        fileURL = nil
+        untitledName = nil
+        stamps = []
+        annotationsByID = [:]
+        selectedPages = []
+        cutMarks = []
+        lastClickedPage = nil
+        hasChanges = false
+        undoManager.removeAllActions()
+        refreshUndoState()
+    }
+
+    private static func countFormFields(in doc: PDFDocument) -> Int {
+        var names = Set<String>()
+        var unnamed = 0
+        for index in 0..<doc.pageCount {
+            for annotation in doc.page(at: index)?.annotations ?? []
+            where annotation.type == "Widget" || annotation.type == "/Widget" {
+                if let name = annotation.fieldName { names.insert(name) } else { unnamed += 1 }
+            }
+        }
+        return names.count + unnamed
     }
 
     func requestOpenPanel() {
@@ -364,7 +584,6 @@ final class DocumentModel: ObservableObject {
         guard document != nil else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
-        let baseName = fileURL?.deletingPathExtension().lastPathComponent ?? "Dokument"
         let suffix = stamps.isEmpty ? "" : loc("save.suffix")
         panel.nameFieldStringValue = baseName + suffix + ".pdf"
         if let dir = fileURL?.deletingLastPathComponent() {
@@ -380,6 +599,7 @@ final class DocumentModel: ObservableObject {
     func exportCurrentState(to url: URL) throws {
         guard let doc = document else { return }
         select(nil)
+        removeGhost()
         let liveStamps = stamps.filter { (0..<doc.pageCount).contains(doc.index(for: $0.page)) }
         if liveStamps.isEmpty {
             // Pure page operations: lossless write preserves text, links, forms.
@@ -395,29 +615,39 @@ final class DocumentModel: ObservableObject {
         finishInlineEditing?(true)
         do {
             try exportCurrentState(to: url)
-            // Remember the visible page so the view doesn't jump to page 1.
+            // Remember the visible page and zoom so the view doesn't jump.
             let visiblePageIndex = pdfView?.currentPage.map { doc.index(for: $0) }
+            if let pdfView {
+                viewStateToRestore = ViewState(scale: pdfView.scaleFactor, autoScales: pdfView.autoScales,
+                                               pageIndex: visiblePageIndex.flatMap { $0 == NSNotFound ? nil : $0 })
+            }
             if let saved = PDFDocument(url: url) {
+                // Selection and cut marks refer to the old page objects; the
+                // saved file has the same pages in the same order.
+                let selected = selectedIndices
+                let cuts = pages.enumerated().filter { cutMarks.contains(ObjectIdentifier($0.element)) }.map(\.offset)
                 document = saved
                 fileURL = url
+                untitledName = nil
+                RecentsStore.add(url)
+                let newPages = pages
+                selectedPages = Set(selected.compactMap { newPages.indices.contains($0) ? ObjectIdentifier(newPages[$0]) : nil })
+                cutMarks = Set(cuts.compactMap { newPages.indices.contains($0) ? ObjectIdentifier(newPages[$0]) : nil })
+                lastClickedPage = nil
                 stamps = []
                 annotationsByID = [:]
                 hasChanges = false
+                formFieldCount = Self.countFormFields(in: saved)
+                formValuesAtLoad = Self.formValues(in: saved)
+                detectFields()
                 docRevision += 1
                 // The undo stack references the pre-save document; drop it.
                 undoManager.removeAllActions()
                 refreshUndoState()
-                if let visiblePageIndex, visiblePageIndex != NSNotFound {
-                    let target = min(visiblePageIndex, saved.pageCount - 1)
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self, let page = self.document?.page(at: target) else { return }
-                        self.pdfView?.go(to: page)
-                    }
-                }
             }
             statusMessage = loc("status.saved", url.lastPathComponent)
         } catch {
-            saveErrorMessage = "\(error)"
+            showError(error.localizedDescription, title: loc("alert.saveError"))
         }
     }
 
@@ -425,6 +655,7 @@ final class DocumentModel: ObservableObject {
         guard let pdfView, pdfView.document != nil else { return }
         // Never print the selection widget (frame, handles, delete button).
         select(nil)
+        removeGhost()
         pdfView.print(with: NSPrintInfo.shared, autoRotate: true, pageScaling: .pageScaleDownToFit)
     }
 
@@ -435,17 +666,92 @@ final class DocumentModel: ObservableObject {
 
     func place(at pagePoint: CGPoint, on page: PDFPage) {
         guard let pending = pendingStamp else { return }
+        Log.ui.notice("place: at \(Int(pagePoint.x), privacy: .public),\(Int(pagePoint.y), privacy: .public) page \(self.document?.index(for: page) ?? -1, privacy: .public)")
         let imgSize = pending.image.size
         let aspect = imgSize.width > 0 ? imgSize.height / imgSize.width : 0.4
         let width = pending.defaultWidth
         let height = width * aspect
         let rect = CGRect(x: pagePoint.x - width / 2, y: pagePoint.y - height / 2,
                           width: width, height: height)
-        let stamp = PlacedStamp(id: UUID(), page: page, rect: rect, image: pending.image,
+        // Counter the page rotation so the stamp appears upright on screen.
+        let stamp = PlacedStamp(id: UUID(), page: page, rect: rect,
+                                rotation: CGFloat(page.rotation), image: pending.image,
                                 text: pending.text, fontSize: pending.fontSize)
         pendingStamp = nil
         restoreStamp(stamp)
         select(stamp.id)
+    }
+
+    /// Size a pending stamp will get when placed.
+    private func placementSize(for pending: PendingStamp) -> CGSize {
+        let imgSize = pending.image.size
+        let aspect = imgSize.width > 0 ? imgSize.height / imgSize.width : 0.4
+        return CGSize(width: pending.defaultWidth, height: pending.defaultWidth * aspect)
+    }
+
+    /// Moves the placement preview to `pagePoint`, creating it on first use.
+    func updateGhost(at pagePoint: CGPoint, on page: PDFPage) {
+        guard let pending = pendingStamp else {
+            removeGhost()
+            return
+        }
+        let size = placementSize(for: pending)
+        let rect = CGRect(x: pagePoint.x - size.width / 2, y: pagePoint.y - size.height / 2,
+                          width: size.width, height: size.height)
+        if let ghost, ghost.image !== pending.image {
+            removeGhost()
+        }
+        let annotation: ImageStampAnnotation
+        if let ghost {
+            annotation = ghost
+            annotation.update(imageRect: rect, rotation: CGFloat(page.rotation))
+        } else {
+            annotation = ImageStampAnnotation(image: pending.image, stampID: UUID(),
+                                              imageRect: rect, rotation: CGFloat(page.rotation))
+            annotation.opacity = 0.45
+            annotation.shouldPrint = false
+            ghost = annotation
+        }
+        if annotation.page !== page {
+            if let previous = annotation.page {
+                detach(annotation, from: previous)
+            }
+            page.addAnnotation(annotation)
+            redraw(page)
+        }
+    }
+
+    func removeGhost() {
+        guard let ghost else { return }
+        if let page = ghost.page {
+            detach(ghost, from: page)
+        }
+        self.ghost = nil
+    }
+
+    /// PDFView does not always repaint after an annotation is added to or
+    /// removed from a page; ask for it explicitly.
+    private func redraw(_ page: PDFPage) {
+        pdfView?.annotationsChanged(on: page)
+    }
+
+    /// Hides a stamp on screen (e.g. while its text is being edited).
+    func setStampVisible(_ id: UUID, _ visible: Bool) {
+        guard let annotation = annotationsByID[id], annotation.shouldDisplay != visible else { return }
+        annotation.shouldDisplay = visible
+        annotation.bounds = annotation.bounds
+        if let page = annotation.page { redraw(page) }
+    }
+
+    /// Removes one of our annotations so it also vanishes from the screen.
+    /// PDFKit leaves the last drawing of a removed custom annotation on
+    /// screen (standard annotations disappear); hiding it first while it is
+    /// still on the page makes PDFKit repaint that area.
+    private func detach(_ annotation: ImageStampAnnotation, from page: PDFPage) {
+        annotation.shouldDisplay = false
+        annotation.bounds = annotation.bounds
+        page.removeAnnotation(annotation)
+        redraw(page)
     }
 
     /// Adds (or re-adds after undo) a stamp; inverse of removeStamp.
@@ -453,8 +759,10 @@ final class DocumentModel: ObservableObject {
         let annotation = ImageStampAnnotation(image: stamp.image, stampID: stamp.id,
                                               imageRect: stamp.rect, rotation: stamp.rotation)
         stamp.page.addAnnotation(annotation)
+        redraw(stamp.page)
         annotationsByID[stamp.id] = annotation
         stamps.append(stamp)
+        onFieldsChanged?()
         hasChanges = true
         undoManager.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated { model.removeStamp(id: stamp.id) }
@@ -466,10 +774,11 @@ final class DocumentModel: ObservableObject {
         guard let idx = stamps.firstIndex(where: { $0.id == id }) else { return }
         let stamp = stamps[idx]
         if let annotation = annotationsByID[id] {
-            stamp.page.removeAnnotation(annotation)
+            detach(annotation, from: stamp.page)
         }
         annotationsByID[id] = nil
         stamps.remove(at: idx)
+        onFieldsChanged?()
         if selectedStampID == id { selectedStampID = nil }
         hasChanges = true
         undoManager.registerUndo(withTarget: self) { model in
@@ -497,9 +806,12 @@ final class DocumentModel: ObservableObject {
     func select(_ id: UUID?) {
         selectedStampID = id
         for (stampID, annotation) in annotationsByID {
-            annotation.isSelectedUI = (stampID == id)
+            let selected = stampID == id
+            guard annotation.isSelectedUI != selected else { continue }
+            annotation.isSelectedUI = selected
             // Re-setting bounds pokes PDFView into redrawing the annotation.
             annotation.bounds = annotation.bounds
+            if let page = annotation.page { redraw(page) }
         }
     }
 
@@ -547,6 +859,37 @@ final class DocumentModel: ObservableObject {
         setRect(id: stamp.id, to: stamp.rect, rotation: normalized)
     }
 
+    /// Re-renders the selected text at `size` (crisp, unlike scaling the
+    /// image), keeping its centre and rotation; one undo step.
+    func setSelectedTextSize(_ size: CGFloat) {
+        guard let stamp = selectedStamp, let text = stamp.text else { return }
+        let size = min(max(size, 6), 96)
+        guard let png = ImageUtils.renderText(text, fontSize: size), let image = NSImage(data: png) else { return }
+        let natural = CGSize(width: image.size.width / 3, height: image.size.height / 3)
+        let rect = CGRect(x: stamp.rect.midX - natural.width / 2, y: stamp.rect.midY - natural.height / 2,
+                          width: natural.width, height: natural.height)
+        let replacement = PlacedStamp(id: UUID(), page: stamp.page, rect: rect, rotation: stamp.rotation,
+                                      image: image, text: text, fontSize: size)
+        undoManager.beginUndoGrouping()
+        removeStamp(id: stamp.id)
+        restoreStamp(replacement)
+        undoManager.endUndoGrouping()
+        undoManager.setActionName(loc("text.size"))
+        select(replacement.id)
+        // The next text starts at the size just chosen.
+        textToolFontSize = size
+    }
+
+    /// Grows or shrinks the selected stamp around its centre; one undo step.
+    func scaleSelected(by factor: CGFloat) {
+        guard let stamp = selectedStamp else { return }
+        let width = min(max(stamp.rect.width * factor, 16), 700)
+        let aspect = stamp.rect.width > 0 ? stamp.rect.height / stamp.rect.width : 0.4
+        let newRect = CGRect(x: stamp.rect.midX - width / 2, y: stamp.rect.midY - width * aspect / 2,
+                             width: width, height: width * aspect)
+        setRect(id: stamp.id, to: newRect)
+    }
+
     func resizeSelected(width: CGFloat) {
         guard let stamp = selectedStamp else { return }
         let aspect = stamp.rect.width > 0 ? stamp.rect.height / stamp.rect.width : 0.4
@@ -558,6 +901,7 @@ final class DocumentModel: ObservableObject {
     }
 
     func cancelPending() {
+        Log.ui.notice("place: cancelled")
         pendingStamp = nil
     }
 
@@ -573,10 +917,19 @@ final class DocumentModel: ObservableObject {
               let png = ImageUtils.renderText(trimmed, fontSize: fontSize),
               let image = NSImage(data: png) else { return nil }
 
-        var rotation: CGFloat = 0
+        var rotation = CGFloat(page.rotation)
         // renderText draws at 3x, so a third of the pixel size is the point size.
         let size = CGSize(width: image.size.width / 3, height: image.size.height / 3)
         var rect = CGRect(origin: origin, size: size)
+        if rotation != 0 {
+            // On a rotated page the text grows to the right *on screen*; place the
+            // rect around the centre the user sees, then counter-rotate it.
+            let center = ImageStampAnnotation.rotate(
+                point: CGPoint(x: origin.x + size.width / 2, y: origin.y + size.height / 2),
+                around: origin, degrees: rotation)
+            rect = CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2,
+                          width: size.width, height: size.height)
+        }
 
         let isReplacement = existingID != nil && stamps.contains { $0.id == existingID }
         // Replacing = remove + add; group them so one Cmd+Z undoes the edit.
@@ -615,10 +968,68 @@ final class DocumentModel: ObservableObject {
                                     label: trimmed,
                                     text: trimmed,
                                     fontSize: fontSize)
+        focusDocumentSoon()
     }
 
     func startPlacingToday(fontSize: CGFloat = 14) {
         startPlacingText(todayString, fontSize: fontSize)
+    }
+
+    /// Tick or cross for forms without fields.
+    func startPlacingMark(_ mark: String) {
+        startPlacingText(mark, fontSize: max(textToolFontSize, 14) + 4)
+    }
+
+    /// Starts placing a signature or initials image.
+    func startPlacing(image: NSImage, defaultWidth: CGFloat, label: String) {
+        pendingStamp = PendingStamp(image: image, defaultWidth: defaultWidth, label: label)
+        focusDocumentSoon()
+    }
+
+    /// Makes the document window key with the PDF view as first responder,
+    /// e.g. after the signature popover closed, so the next click lands.
+    func focusDocumentSoon() {
+        DispatchQueue.main.async { [weak self] in
+            guard let view = self?.pdfView, let window = view.window else {
+                Log.ui.notice("focus: no PDF view window")
+                return
+            }
+            Log.ui.notice("focus: window key \(window.isKeyWindow, privacy: .public), app active \(NSApp.isActive, privacy: .public)")
+            if !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
+            window.makeFirstResponder(view)
+        }
+    }
+
+    /// Places `image` in the lower right corner of every page (initials on
+    /// every page of a contract); one undo step.
+    func placeOnEveryPage(image: NSImage, width: CGFloat) {
+        guard let doc = document else { return }
+        endTools()
+        let aspect = image.size.width > 0 ? image.size.height / image.size.width : 0.4
+        let size = CGSize(width: width, height: width * aspect)
+        let margin: CGFloat = 28
+        undoManager.beginUndoGrouping()
+        for page in pages {
+            let box = page.bounds(for: .cropBox)
+            // Lower right as seen on screen, whatever the page rotation.
+            let visual: CGPoint
+            switch ((page.rotation % 360) + 360) % 360 {
+            // Shown rotated clockwise: at 90° the page's right edge is at the
+            // bottom and its top edge on the right, and so on.
+            case 90: visual = CGPoint(x: box.maxX - margin - size.height / 2, y: box.maxY - margin - size.width / 2)
+            case 180: visual = CGPoint(x: box.minX + margin + size.width / 2, y: box.maxY - margin - size.height / 2)
+            case 270: visual = CGPoint(x: box.minX + margin + size.height / 2, y: box.minY + margin + size.width / 2)
+            default: visual = CGPoint(x: box.maxX - margin - size.width / 2, y: box.minY + margin + size.height / 2)
+            }
+            let rect = CGRect(x: visual.x - size.width / 2, y: visual.y - size.height / 2,
+                              width: size.width, height: size.height)
+            restoreStamp(PlacedStamp(id: UUID(), page: page, rect: rect,
+                                     rotation: CGFloat(page.rotation), image: image))
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName(loc("undo.initialsEveryPage"))
+        refreshUndoState()
+        statusMessage = locCount("status.initialsPlaced", doc.pageCount)
     }
 
     // MARK: - Seiten-Operationen
@@ -642,30 +1053,22 @@ final class DocumentModel: ObservableObject {
         // Keep the stamps' annotations on the removed page so undo can restore everything.
         let affected = stamps.filter { $0.page === page }
         stamps.removeAll { $0.page === page }
+        selectedPages.remove(ObjectIdentifier(page))
+        let hadCut = cutMarks.remove(ObjectIdentifier(page)) != nil
         doc.removePage(at: index)
         undoManager.registerUndo(withTarget: self) { model in
-            MainActor.assumeIsolated { model.reinsertPage(page, at: index, stamps: affected) }
+            MainActor.assumeIsolated { model.reinsertPage(page, at: index, stamps: affected, cut: hadCut) }
         }
         changed()
     }
 
-    func reinsertPage(_ page: PDFPage, at index: Int, stamps affected: [PlacedStamp]) {
+    func reinsertPage(_ page: PDFPage, at index: Int, stamps affected: [PlacedStamp], cut: Bool = false) {
         guard let doc = document else { return }
         doc.insert(page, at: min(index, doc.pageCount))
         stamps.append(contentsOf: affected)
+        if cut { cutMarks.insert(ObjectIdentifier(page)) }
         undoManager.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated { model.deletePage(index) }
-        }
-        changed()
-    }
-
-    func movePage(_ index: Int, offset: Int) {
-        guard let doc = document else { return }
-        let target = index + offset
-        guard target >= 0, target < doc.pageCount, target != index else { return }
-        doc.exchangePage(at: index, withPageAt: target)
-        undoManager.registerUndo(withTarget: self) { model in
-            MainActor.assumeIsolated { model.movePage(target, offset: -offset) }
         }
         changed()
     }
@@ -692,31 +1095,16 @@ final class DocumentModel: ObservableObject {
     /// Splits the open document (incl. unsaved stamps) into one PDF per page.
     func splitIntoSingles(folder: URL) throws -> Int {
         guard let doc = document else { return 0 }
-        let base = fileURL?.deletingPathExtension().lastPathComponent ?? "Dokument"
         for i in 0..<doc.pageCount {
-            let name = String(format: "%@ – %@ %02d.pdf", base, loc("split.pageWord"), i + 1)
+            let name = String(format: "%@ – %@ %02d.pdf", baseName, loc("split.pageWord"), i + 1)
             try extractPages([i], to: folder.appendingPathComponent(name))
         }
         return doc.pageCount
     }
 
-    func extractPage(_ index: Int) {
-        guard document != nil else { return }
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.pdf]
-        let baseName = fileURL?.deletingPathExtension().lastPathComponent ?? "Dokument"
-        panel.nameFieldStringValue = "\(baseName) – \(loc("split.pageWord")) \(index + 1).pdf"
-        if panel.runModal() == .OK, let url = panel.url {
-            do {
-                try extractPages([index], to: url)
-                statusMessage = loc("status.saved", url.lastPathComponent)
-            } catch {
-                saveErrorMessage = "\(error)"
-            }
-        }
-    }
-
-    private func changed() {
+    func changed() {
+        detectFields(reset: false)
+        onFieldsChanged?()
         hasChanges = true
         docRevision += 1
         pdfView?.layoutDocumentView()
