@@ -36,6 +36,13 @@ export DMG_ICON="assets/AppIcon.icns"
 export DMG_BG="assets/dmg/background.png"
 
 dmgbuild -s scripts/dmg_settings.py "$VOLNAME" "$FINAL_DMG"
+# Release builds: sign and notarize the disk image too, so Gatekeeper accepts it even offline.
+if [ -n "$SIGN_IDENTITY" ]; then
+  codesign --force --timestamp -s "$SIGN_IDENTITY" "$FINAL_DMG"
+  if [ -n "$NOTARY_KEY_ID" ]; then
+    ./scripts/notarize.sh "$FINAL_DMG"
+  fi
+fi
 echo "Built $FINAL_DMG"
 
 # Version-pinned + stable copies for the release, mirroring the zip naming.

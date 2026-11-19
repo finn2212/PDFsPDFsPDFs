@@ -27,5 +27,21 @@ if [ -d "$SPARKLE_FW" ]; then
   install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/EasyPDF" 2>/dev/null || true
 fi
 
-codesign --force --deep -s - "$APP"
+# Signing: ad hoc by default (local builds, CI checks). Release builds set SIGN_IDENTITY to the
+# "Developer ID Application: …" certificate; then everything is signed inside out with the hardened
+# runtime and a secure timestamp, which notarization requires. Sparkle's helpers come first, as in
+# Sparkle's own instructions; --deep would sign them without the runtime flag.
+if [ -n "$SIGN_IDENTITY" ]; then
+  sign() { codesign --force --options runtime --timestamp -s "$SIGN_IDENTITY" "$@"; }
+  FW="$APP/Contents/Frameworks/Sparkle.framework"
+  sign "$FW/Versions/B/XPCServices/Installer.xpc"
+  sign --preserve-metadata=entitlements "$FW/Versions/B/XPCServices/Downloader.xpc"
+  sign "$FW/Versions/B/Autoupdate"
+  sign "$FW/Versions/B/Updater.app"
+  sign "$FW"
+  sign "$APP"
+  codesign --verify --strict --deep "$APP"
+else
+  codesign --force --deep -s - "$APP"
+fi
 echo "Built $APP"

@@ -5,6 +5,13 @@
 #   Name:  SPARKLE_ED_PRIVATE_KEY
 #   Value: output of `.build/artifacts/sparkle/Sparkle/bin/generate_keys -x /dev/stdout`
 #          (the base64 private key line)
+#
+# Developer ID signing and notarization (without these the release stays ad hoc signed):
+#   DEVELOPER_ID_P12           base64 of the exported "Developer ID Application" identity (.p12)
+#   DEVELOPER_ID_P12_PASSWORD  the password the .p12 was exported with
+#   NOTARY_KEY_P8              base64 of the App Store Connect API key (AuthKey_<id>.p8)
+#   NOTARY_KEY_ID              the key's ID
+#   NOTARY_ISSUER_ID           the issuer ID
 name: Release
 
 on:
@@ -29,8 +36,42 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" Info.plist
 
+      - name: Import Developer ID certificate
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          if [ -z "$DEVELOPER_ID_P12" ]; then
+            echo "::warning::No Developer ID secrets: this release is ad hoc signed and not notarized."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/devid.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/devid.p12" -k "$KEYCHAIN" -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/devid.p12"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')"
+          [ -n "$IDENTITY" ] || { echo "ERROR: no Developer ID Application identity in the .p12" >&2; exit 1; }
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          echo "NOTARY_KEY_PATH=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
+          echo "NOTARY_KEY_ID=$NOTARY_KEY_ID" >> "$GITHUB_ENV"
+          echo "NOTARY_ISSUER_ID=$NOTARY_ISSUER_ID" >> "$GITHUB_ENV"
+
       - name: Build app (universal)
         run: ./build_app.sh
+
+      - name: Notarize app
+        if: env.SIGN_IDENTITY != ''
+        run: ./scripts/notarize.sh dist/PDFsPDFsPDFs.app
 
       - name: Zip app
         run: |
