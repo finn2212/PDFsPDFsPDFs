@@ -91,6 +91,16 @@ extension SnapshotScenario {
                 .map { URL(fileURLWithPath: "/tmp/\($0)") })
                 .environmentObject(doc))
         }),
+        SnapshotScenario(name: "new-16-password", standalone: { doc, _ in
+            AnyView(PasswordSheet(request: PasswordRequest(purpose: .open, fileName: "Kontoauszug.pdf",
+                                                           pending: nil, url: nil))
+                .environmentObject(doc))
+        }),
+        SnapshotScenario(name: "new-17-owner-password", standalone: { doc, _ in
+            AnyView(PasswordSheet(request: PasswordRequest(purpose: .removeRestrictions, fileName: "Vertrag.pdf",
+                                                           pending: nil, url: nil))
+                .environmentObject(doc))
+        }),
         SnapshotScenario(name: "new-12-pages-dark", prepare: { doc, _ in
             NSApp.appearance = NSAppearance(named: .darkAqua)
             doc.openAsNew([Snapshot.sample, Snapshot.secondSample].compactMap { $0 })

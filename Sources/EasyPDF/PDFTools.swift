@@ -4,12 +4,14 @@ import PDFKit
 enum PDFTools {
     enum ToolError: LocalizedError {
         case cantOpen(String)
+        case locked(String)
         case writeFailed
         case emptySelection
 
         var errorDescription: String? {
             switch self {
             case .cantOpen(let name): return loc("error.cantOpen", name)
+            case .locked(let name): return loc("error.locked", name)
             case .writeFailed: return loc("error.writeFailed")
             case .emptySelection: return loc("error.emptySelection")
             }
@@ -22,6 +24,7 @@ enum PDFTools {
             guard let doc = PDFDocument(url: url) else {
                 throw ToolError.cantOpen(url.lastPathComponent)
             }
+            guard !doc.isLocked else { throw ToolError.locked(url.lastPathComponent) }
             for i in 0..<doc.pageCount {
                 // Copy: PDFKit re-parents inserted pages, which would mutate the source.
                 if let page = doc.page(at: i)?.copy() as? PDFPage {

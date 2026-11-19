@@ -385,6 +385,14 @@ final class DocumentModel: ObservableObject {
     @Published var pendingDrop: PendingDrop?
     @Published var imagesRequest: ImagesRequest?
     @Published var exportImagesRequested = false
+    /// Password sheet: opening a locked PDF or lifting its restrictions.
+    @Published var passwordRequest: PasswordRequest?
+    /// "Remove password" confirmation: overwrite the original or save a copy.
+    @Published var removeProtectionConfirm = false
+    var confirmAfterPasswordSheet = false
+    /// Set while the open document is encrypted.
+    @Published var protectionKind: ProtectionKind?
+    @Published var protectionHintDismissed = false
     /// Signature editor sheet: the person being edited, and which asset.
     @Published var signatureEditor: SignatureEditorRequest?
 
@@ -492,6 +500,10 @@ final class DocumentModel: ObservableObject {
             showError(loc("error.cantOpen", url.lastPathComponent), title: loc("alert.openError"))
             return
         }
+        if doc.isLocked {
+            askForOpenPassword(doc, url: url)
+            return
+        }
         load(doc, url: url, untitledName: nil, mode: .document)
         RecentsStore.add(url)
     }
@@ -507,7 +519,7 @@ final class DocumentModel: ObservableObject {
         return true
     }
 
-    private func load(_ doc: PDFDocument, url: URL?, untitledName: String?, mode: WorkspaceMode) {
+    func load(_ doc: PDFDocument, url: URL?, untitledName: String?, mode: WorkspaceMode) {
         endTools()
         resumePageIndex = nil
         document = doc
@@ -524,6 +536,8 @@ final class DocumentModel: ObservableObject {
         formFieldCount = Self.countFormFields(in: doc)
         formValuesAtLoad = Self.formValues(in: doc)
         formHintDismissed = false
+        protectionKind = PDFProtection.kind(of: doc, openedWithPassword: false)
+        protectionHintDismissed = false
         docRevision += 1
         undoManager.removeAllActions()
         refreshUndoState()
@@ -545,6 +559,7 @@ final class DocumentModel: ObservableObject {
         cutMarks = []
         lastClickedPage = nil
         hasChanges = false
+        protectionKind = nil
         undoManager.removeAllActions()
         refreshUndoState()
     }
@@ -595,33 +610,38 @@ final class DocumentModel: ObservableObject {
     }
 
     /// Writes the current in-memory state to `url` without touching model state.
-    /// Flattens if stamps exist, otherwise writes losslessly.
-    func exportCurrentState(to url: URL) throws {
+    /// Flattens if stamps exist, otherwise writes losslessly. A lossless write
+    /// keeps the file's encryption unless `removingProtection` is set.
+    func exportCurrentState(to url: URL, removingProtection: Bool = false) throws {
         guard let doc = document else { return }
         select(nil)
         removeGhost()
         let liveStamps = stamps.filter { (0..<doc.pageCount).contains(doc.index(for: $0.page)) }
         if liveStamps.isEmpty {
             // Pure page operations: lossless write preserves text, links, forms.
-            guard doc.write(to: url) else { throw PDFFlattener.FlattenError.contextCreationFailed }
+            let source = removingProtection && doc.isEncrypted ? PDFProtection.unprotectedCopy(of: doc) : doc
+            guard source.write(to: url) else { throw PDFFlattener.FlattenError.contextCreationFailed }
         } else {
             try PDFFlattener.flatten(document: doc, to: url)
         }
     }
 
-    func save(to url: URL) {
+    func save(to url: URL, removingProtection: Bool = false) {
         guard let doc = document else { return }
         // Saving reloads the document, which would orphan an open editor.
         finishInlineEditing?(true)
         do {
-            try exportCurrentState(to: url)
+            try exportCurrentState(to: url, removingProtection: removingProtection)
             // Remember the visible page and zoom so the view doesn't jump.
             let visiblePageIndex = pdfView?.currentPage.map { doc.index(for: $0) }
             if let pdfView {
                 viewStateToRestore = ViewState(scale: pdfView.scaleFactor, autoScales: pdfView.autoScales,
                                                pageIndex: visiblePageIndex.flatMap { $0 == NSNotFound ? nil : $0 })
             }
-            if let saved = PDFDocument(url: url) {
+            // A file that still has its open password reloads locked, and the
+            // password is not kept; the written state equals the current one.
+            let reloaded = PDFDocument(url: url)
+            if let saved = reloaded?.isLocked == false ? reloaded : doc {
                 // Selection and cut marks refer to the old page objects; the
                 // saved file has the same pages in the same order.
                 let selected = selectedIndices
@@ -639,13 +659,14 @@ final class DocumentModel: ObservableObject {
                 hasChanges = false
                 formFieldCount = Self.countFormFields(in: saved)
                 formValuesAtLoad = Self.formValues(in: saved)
+                if !saved.isEncrypted { protectionKind = nil }
                 detectFields()
                 docRevision += 1
                 // The undo stack references the pre-save document; drop it.
                 undoManager.removeAllActions()
                 refreshUndoState()
             }
-            statusMessage = loc("status.saved", url.lastPathComponent)
+            statusMessage = loc(removingProtection ? "status.unprotected" : "status.saved", url.lastPathComponent)
         } catch {
             showError(error.localizedDescription, title: loc("alert.saveError"))
         }

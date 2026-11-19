@@ -375,6 +375,8 @@ private struct PagesContextRow: View {
                         try? await Task.sleep(nanoseconds: 3_500_000_000)
                         if doc.statusMessage == status { doc.statusMessage = nil }
                     }
+            } else if doc.isProtected && !doc.protectionHintDismissed {
+                ProtectionHint()
             } else if doc.parts.count > 1 {
                 Image(systemName: "scissors").foregroundStyle(.red)
                 Text(loc("pages.cutSummary", doc.parts.count))

@@ -39,6 +39,12 @@ Oben in der Leiste wechselst du zwischen **Dokument** (unterschreiben und ausfü
 - **PDF → Bilder** (Ablage › Als Bilder exportieren): jede Seite als PNG, JPEG, TIFF, HEIC oder AVIF in 150/300/600 dpi.
 - Alles rein nativ (CoreGraphics/ImageIO/PDFKit), **lokal, ohne Upload**.
 
+### Passwortschutz entfernen
+
+- Passwortgeschützte PDFs fragen beim Öffnen nach dem Passwort; ein falsches wird klar gemeldet. Das Passwort wird nirgends gespeichert.
+- **Ablage › Passwort entfernen …** (oder der Hinweis über der Seite): **Original überschreiben** oder **Kopie ohne Passwort sichern …** – die neue Datei ist wirklich unverschlüsselt.
+- PDFs mit Einschränkungen (Drucken, Kopieren, Ändern verboten) brauchen dafür das Berechtigungspasswort, wie in Vorschau und Acrobat.
+
 ### Speichern & Komfort
 
 - PDF öffnen per Finder-Doppelklick („Öffnen mit“), Dock-Drop, Drag & Drop, „Zuletzt geöffnet“.
@@ -89,7 +95,7 @@ DYLD_FRAMEWORK_PATH=.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-a
   "$(swift build --show-bin-path)/EasyPDF" --selftest
 ```
 
-Verifiziert headless auf Pixelebene: Stempel-Flattening, Merge, Seitenbereichs-Parser, Extraktion, Einzelseiten-Split, Seitenlöschung + verlustfreies Schreiben, 90°-Rotation, Text-/Stroke-Rendering, die Konvertierung (A4-MediaBox statt Letter, EXIF-Orientierung, mehrseitiges TIFF → mehrere Seiten, Ablehnung von PDF-Eingaben, PDF→Bild-Export) sowie die Seiten-Ansicht: Verschieben/Löschen/Drehen/Einfügen mit Rückgängig und Wiederholen, Mehrfachauswahl, Trennen an Schnitten, Initialen auf gedrehten Seiten und der Teilen-Export ohne Platzier-Vorschau.
+Verifiziert headless auf Pixelebene: Stempel-Flattening, Merge, Seitenbereichs-Parser, Extraktion, Einzelseiten-Split, Seitenlöschung + verlustfreies Schreiben, 90°-Rotation, Text-/Stroke-Rendering, die Konvertierung (A4-MediaBox statt Letter, EXIF-Orientierung, mehrseitiges TIFF → mehrere Seiten, Ablehnung von PDF-Eingaben, PDF→Bild-Export) sowie die Seiten-Ansicht: Verschieben/Löschen/Drehen/Einfügen mit Rückgängig und Wiederholen, Mehrfachauswahl, Trennen an Schnitten, Initialen auf gedrehten Seiten und der Teilen-Export ohne Platzier-Vorschau sowie das Entfernen von Passwörtern (Öffnen mit Passwort, Berechtigungspasswort, Ausgabe wirklich unverschlüsselt).
 
 ### Oberfläche als Bilder rendern (Debug-Builds)
 
@@ -121,6 +127,7 @@ Der Snapshot-Modus rendert Startbildschirm, Dokument- und Seiten-Ansicht, Unters
 - `Sources/EasyPDF/DocumentModel.swift` – Dokumentzustand, Stempel, Undo, Flattening, Platzier-Vorschau
 - `Sources/EasyPDF/DocumentModel+Pages.swift` – Seiten-Operationen auf Auswahlen (verschieben, löschen, drehen, einfügen, trennen)
 - `Sources/EasyPDF/DocumentModel+Files.swift` – Öffnen, Zusammenfügen, Drops, Teilen, Datei-Dialoge
+- `Sources/EasyPDF/DocumentModel+Protection.swift` – Passwortgeschützte PDFs: Entsperren, Passwort-Dialog, Schutz entfernen
 - `Sources/EasyPDF/Convert/` – Konverter: `ConvertTypes`, `ImageToPDF`, `PDFToImage`, `ConvertSheets` (UI)
 - `Sources/EasyPDF/PDFTools.swift` – Merge, Split, Extract, Range-Parser
 - `Sources/EasyPDF/PDFViewRepresentable.swift` – interaktive PDF-Ansicht (Auswahl-Widget, Inline-Text, Vorschau)

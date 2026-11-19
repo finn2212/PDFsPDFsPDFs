@@ -200,6 +200,8 @@ struct DocumentContextRow: View {
                     try? await Task.sleep(nanoseconds: 3_500_000_000)
                     if doc.statusMessage == status { doc.statusMessage = nil }
                 }
+        } else if doc.isProtected && !doc.protectionHintDismissed {
+            ProtectionHint()
         } else if doc.formFieldCount > 0 && !doc.formHintDismissed {
             Image(systemName: "rectangle.and.pencil.and.ellipsis").foregroundStyle(Color.accentColor)
             Text(locCount("hint.form", doc.formFieldCount))
