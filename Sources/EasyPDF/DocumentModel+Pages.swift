@@ -211,6 +211,7 @@ enum FileImport {
                 guard let doc = PDFDocument(url: url) else {
                     throw PDFTools.ToolError.cantOpen(url.lastPathComponent)
                 }
+                guard !doc.isLocked else { throw PDFTools.ToolError.locked(url.lastPathComponent) }
                 result += copies(of: doc)
             } else if ConvertSupport.isConvertibleImage(url) {
                 let tmp = FileManager.default.temporaryDirectory

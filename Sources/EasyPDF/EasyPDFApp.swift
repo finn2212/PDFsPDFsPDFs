@@ -101,6 +101,11 @@ struct EasyPDFApp: App {
 
                 Button(loc("menu.exportImages")) { doc.exportImagesRequested = true }
                     .disabled(doc.document == nil)
+
+                Divider()
+
+                Button(loc("protection.remove")) { doc.requestRemoveProtection() }
+                    .disabled(!doc.isProtected)
             }
 
             CommandGroup(replacing: .printItem) {

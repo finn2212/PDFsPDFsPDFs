@@ -26,6 +26,7 @@ enum SelfTest {
                 try testShareExport()
                 try testSaveKeepsPageStateAndFormEdits()
                 try testFieldDetection()
+                try testRemoveProtection()
             }
             print("SELFTEST PASS")
             exit(0)
@@ -839,6 +840,122 @@ enum SelfTest {
               !fields.contains(where: { $0.rect.minY > 355 && $0.rect.maxY < 410 }) // not the table
         else {
             throw TestError.message("field detection: \(summary)")
+        }
+    }
+
+    /// Password-protected PDFs: unlock on open (wrong password refused),
+    /// owner password for restrictions, and both ways of saving without
+    /// protection really drop the encryption.
+    @MainActor
+    private static func testRemoveProtection() throws {
+        let plainURL = dir.appendingPathComponent("protect-plain.pdf")
+        var box = CGRect(x: 0, y: 0, width: 300, height: 300)
+        guard let ctx = CGContext(plainURL as CFURL, mediaBox: &box, nil) else { throw TestError.message("protect ctx") }
+        ctx.beginPDFPage(nil)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        ("Geheim" as NSString).draw(at: NSPoint(x: 40, y: 200), withAttributes: [.font: NSFont.systemFont(ofSize: 24)])
+        NSGraphicsContext.restoreGraphicsState()
+        ctx.endPDFPage()
+        ctx.closePDF()
+        guard let plain = PDFDocument(url: plainURL) else { throw TestError.message("protect plain") }
+        func encrypted(_ name: String, _ options: [PDFDocumentWriteOption: Any]) throws -> URL {
+            let url = dir.appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: url)
+            guard plain.write(to: url, withOptions: options), PDFDocument(url: url)?.isEncrypted == true else {
+                throw TestError.message("could not encrypt \(name)")
+            }
+            return url
+        }
+        func assertUnprotected(_ url: URL, _ what: String) throws {
+            guard let out = PDFDocument(url: url), !out.isEncrypted, !out.isLocked,
+                  out.pageCount == 1, out.string?.contains("Geheim") == true else {
+                throw TestError.message("\(what): output still protected or lost its text")
+            }
+        }
+        let all = NSNumber(value: UInt32.max)
+
+        // User password, no permissions: open needs it, removal needs the owner password.
+        let userURL = try encrypted("protect-user.pdf", [.userPasswordOption: "user1", .ownerPasswordOption: "owner1",
+                                                         .accessPermissionsOption: NSNumber(value: 0)])
+        let model = DocumentModel()
+        model.open(url: userURL)
+        guard model.document == nil, let request = model.passwordRequest, request.purpose == .open else {
+            throw TestError.message("locked PDF opened without asking for the password")
+        }
+        guard !model.submitPassword("falsch", for: request), model.document == nil, model.passwordRequest != nil else {
+            throw TestError.message("wrong open password accepted")
+        }
+        guard model.submitPassword("user1", for: request), model.passwordRequest == nil,
+              model.pageCount == 1, model.fileURL == userURL, model.protectionKind == .password else {
+            throw TestError.message("right open password not accepted")
+        }
+        model.requestRemoveProtection()
+        guard let ownerRequest = model.passwordRequest, ownerRequest.purpose == .removeRestrictions,
+              !model.removeProtectionConfirm else {
+            throw TestError.message("restricted PDF did not ask for the owner password")
+        }
+        guard !model.submitPassword("user1", for: ownerRequest), !model.submitPassword("falsch", for: ownerRequest) else {
+            throw TestError.message("wrong owner password accepted")
+        }
+        guard model.submitPassword("owner1", for: ownerRequest) else { throw TestError.message("owner password refused") }
+        model.passwordSheetDismissed()
+        guard model.removeProtectionConfirm else { throw TestError.message("no confirmation after owner password") }
+        // Save copy: written file is unprotected, the open document stays as it is.
+        let copyURL = dir.appendingPathComponent("protect-user-copy.pdf")
+        try model.exportCurrentState(to: copyURL, removingProtection: true)
+        try assertUnprotected(copyURL, "copy without password")
+        guard model.isProtected, PDFDocument(url: userURL)?.isLocked == true else {
+            throw TestError.message("saving a copy changed the original")
+        }
+        // A plain save keeps the protection and the document stays usable.
+        model.save(to: userURL)
+        guard PDFDocument(url: userURL)?.isLocked == true, model.document?.isLocked == false, model.pageCount == 1 else {
+            throw TestError.message("plain save of a protected PDF")
+        }
+        // Overwrite the original.
+        model.removeProtectionInPlace()
+        try assertUnprotected(userURL, "overwritten original")
+        guard !model.isProtected, model.protectionKind == nil, model.fileURL == userURL else {
+            throw TestError.message("model still protected after overwrite")
+        }
+
+        // Owner password only, nothing allowed: opens directly, removal needs the owner password.
+        let ownerURL = try encrypted("protect-owner.pdf", [.ownerPasswordOption: "owner1",
+                                                           .accessPermissionsOption: NSNumber(value: 0)])
+        let ownerModel = DocumentModel()
+        ownerModel.open(url: ownerURL)
+        guard ownerModel.passwordRequest == nil, ownerModel.pageCount == 1,
+              ownerModel.protectionKind == .restrictions else {
+            throw TestError.message("owner-only PDF: open \(String(describing: ownerModel.protectionKind))")
+        }
+        ownerModel.requestRemoveProtection()
+        guard let restrictions = ownerModel.passwordRequest, restrictions.purpose == .removeRestrictions,
+              !ownerModel.submitPassword("falsch", for: restrictions),
+              ownerModel.submitPassword("owner1", for: restrictions) else {
+            throw TestError.message("owner-only PDF: owner password check")
+        }
+        ownerModel.removeProtectionInPlace()
+        try assertUnprotected(ownerURL, "owner-only overwrite")
+
+        // User password with every permission: the user password is enough.
+        let openURL = try encrypted("protect-open.pdf", [.userPasswordOption: "user1", .ownerPasswordOption: "owner1",
+                                                         .accessPermissionsOption: all])
+        let openModel = DocumentModel()
+        openModel.open(url: openURL)
+        guard let openRequest = openModel.passwordRequest, openModel.submitPassword("user1", for: openRequest) else {
+            throw TestError.message("permissive PDF: open")
+        }
+        openModel.requestRemoveProtection()
+        guard openModel.passwordRequest == nil, openModel.removeProtectionConfirm else {
+            throw TestError.message("permissive PDF asked for the owner password")
+        }
+
+        // Merging a locked file fails with a clear message instead of blank pages.
+        do {
+            _ = try FileImport.document(from: [plainURL, openURL])
+            throw TestError.message("locked PDF merged")
+        } catch PDFTools.ToolError.locked {
         }
     }
 }

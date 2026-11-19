@@ -33,6 +33,19 @@ struct ContentView: View {
             ExportImagesSheet()
                 .environmentObject(doc)
         }
+        .sheet(item: $doc.passwordRequest, onDismiss: { doc.passwordSheetDismissed() }) { request in
+            PasswordSheet(request: request)
+                .environmentObject(doc)
+        }
+        .confirmationDialog(loc("protection.confirm.title"), isPresented: $doc.removeProtectionConfirm) {
+            if doc.fileURL != nil {
+                Button(loc("protection.confirm.overwrite"), role: .destructive) { doc.removeProtectionInPlace() }
+            }
+            Button(loc("protection.confirm.copy")) { doc.removeProtectionAsCopy() }
+            Button(loc("action.cancel"), role: .cancel) {}
+        } message: {
+            Text(loc("protection.confirm.message", doc.displayName))
+        }
         .confirmationDialog(dropTitle,
                             isPresented: Binding(get: { doc.pendingDrop != nil },
                                                  set: { if !$0 { doc.pendingDrop = nil } }),
