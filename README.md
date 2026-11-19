@@ -58,7 +58,7 @@ Neueste Version: **[Releases](https://github.com/finn2212/PDFsPDFsPDFs/releases)
 
 > **Wichtig:** Die App muss in **/Programme** liegen, damit die Auto-Updates funktionieren — aus `~/Downloads` heraus gestartet, kann sich die App nicht selbst aktualisieren. Genau dafür ist das DMG da.
 
-**Erster Start** (die App ist nicht Apple-notarisiert — sie ist kostenlos und Open Source; der Quellcode liegt hier im Repo):
+**Erster Start**: Ab 2.1.1 ist die App von Apple notarisiert und öffnet sich ohne Rückfrage. Ältere Versionen (bis 2.1.0) waren nur ad hoc signiert:
 
 - **macOS 15 (Sequoia) oder neuer**: App einmal öffnen (Meldung erscheint) → **Systemeinstellungen → Datenschutz & Sicherheit** → unten bei „PDFsPDFsPDFs“ auf **„Dennoch öffnen“** klicken.
 - **macOS 13/14**: Rechtsklick auf die App → **Öffnen** → „Öffnen“ bestätigen.
@@ -80,10 +80,12 @@ Das DMG wird headless über [`dmgbuild`](https://pypi.org/project/dmgbuild/) erz
 ## Release ausrollen (Maintainer)
 
 ```bash
-./scripts/release.sh 1.1.0 --publish
+git tag v2.1.1 && git push origin v2.1.1
 ```
 
-Baut die App, zippt sie, signiert das Update mit dem Sparkle-EdDSA-Schlüssel (Keychain), erzeugt `appcast.xml`, baut das Installer-DMG und veröffentlicht alles als GitHub-Release. Alternativ vollautomatisch: Tag pushen (`git tag v1.1.0 && git push --tags`) — die GitHub-Action baut und veröffentlicht (benötigt einmalig das Repo-Secret `SPARKLE_ED_PRIVATE_KEY`, siehe [.github/workflows/release.yml](.github/workflows/release.yml)).
+Die GitHub-Action ([.github/workflows/release.yml](.github/workflows/release.yml)) baut die App, signiert sie mit der Developer ID (Hardened Runtime), lässt App und DMG von Apple notarisieren, heftet das Ticket an, signiert das Update mit dem Sparkle-EdDSA-Schlüssel, erzeugt `appcast.xml` und veröffentlicht alles als GitHub-Release. Repo-Secrets: `SPARKLE_ED_PRIVATE_KEY`, `DEVELOPER_ID_P12`, `DEVELOPER_ID_P12_PASSWORD`, `NOTARY_KEY_P8`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID` (Details im Kopf der Workflow-Datei). Fehlen die Developer-ID-Secrets, bleibt das Release ad hoc signiert und die Action warnt.
+
+Lokal geht es auch mit `./scripts/release.sh 2.1.1 --publish`, sofern der Sparkle-Schlüssel im Schlüsselbund liegt; mit `SIGN_IDENTITY` und `NOTARY_KEY_*` gesetzt wird ebenso signiert und notarisiert (`scripts/notarize.sh`).
 
 Die App findet Updates über `SUFeedURL` → `releases/latest/download/appcast.xml`, d. h. jedes neue Release ist automatisch der Update-Feed. Der Update-Kanal läuft bewusst weiter über das **Zip** — das DMG wird nach dem Appcast gebaut und ist nur der Erstinstall-Download für Menschen.
 
